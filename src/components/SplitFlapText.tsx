@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 const POOL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ&/0123456789';
 
@@ -21,22 +21,28 @@ type Props = {
   target: string;
   startDelay?: number;
   step?: number;
+  interval?: number;
   className?: string;
   settledClassName?: string;
   flippingClassName?: string;
   inView?: boolean;
+  onComplete?: () => void;
 };
 
 const SplitFlapText: React.FC<Props> = ({
   target,
   startDelay = 200,
   step = 110,
+  interval = 70,
   className = '',
   settledClassName = 'text-[#d7c4aa]',
   flippingClassName = 'text-[#d7ff4f]',
   inView = true,
+  onComplete,
 }) => {
   const length = target.length;
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
   const [chars, setChars] = useState<string[]>(() => target.split(''));
   const [flipping, setFlipping] = useState<boolean[]>(() => Array(length).fill(false));
   const [settled, setSettled] = useState<boolean[]>(() => Array(length).fill(false));
@@ -55,12 +61,27 @@ const SplitFlapText: React.FC<Props> = ({
   useEffect(() => {
     if (!inView) return;
 
+    const reduce =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (reduce) {
+      setChars(target.split(''));
+      setFlipping(Array(length).fill(false));
+      setSettled(Array(length).fill(true));
+      onCompleteRef.current?.();
+      return;
+    }
+
     // Fresh start each time we enter view (also keeps Strict Mode honest).
     setChars(Array(length).fill('X'));
     setFlipping(Array(length).fill(false));
     setSettled(Array(length).fill(false));
 
     const timers: ReturnType<typeof setTimeout>[] = [];
+    const steps = 6;
+    const scrambleStart = 75;
+    let lastSettle = startDelay;
 
     for (let i = 0; i < length; i++) {
       const base = startDelay + i * step;
@@ -73,6 +94,7 @@ const SplitFlapText: React.FC<Props> = ({
             setSettled((s) => s.map((v, j) => (j === i ? true : v)));
           }, base),
         );
+        lastSettle = Math.max(lastSettle, base);
         continue;
       }
 
@@ -82,7 +104,6 @@ const SplitFlapText: React.FC<Props> = ({
         }, base),
       );
 
-      const steps = 6;
       for (let s = 0; s < steps; s++) {
         timers.push(
           setTimeout(() => {
@@ -93,20 +114,28 @@ const SplitFlapText: React.FC<Props> = ({
                 return POOL[Math.floor(Math.random() * POOL.length)];
               }),
             );
-          }, base + 60 + s * 55),
+          }, base + scrambleStart + s * interval),
         );
       }
 
+      const settleAt = base + scrambleStart + steps * interval + 50;
+      lastSettle = Math.max(lastSettle, settleAt);
       timers.push(
         setTimeout(() => {
           setFlipping((f) => f.map((v, j) => (j === i ? false : v)));
           setSettled((s) => s.map((v, j) => (j === i ? true : v)));
-        }, base + 60 + steps * 55 + 40),
+        }, settleAt),
       );
     }
 
+    timers.push(
+      setTimeout(() => {
+        onCompleteRef.current?.();
+      }, lastSettle + 80),
+    );
+
     return () => timers.forEach(clearTimeout);
-  }, [inView, target, startDelay, step, length]);
+  }, [inView, target, startDelay, step, interval, length]);
 
   return (
     <span
@@ -124,7 +153,8 @@ const SplitFlapText: React.FC<Props> = ({
           <span
             key={i}
             data-flipping={flipping[i] ? 'true' : 'false'}
-            className="splitflap-tile relative inline-block align-baseline"
+            data-hero-physics={t === ' ' ? undefined : 'letter'}
+            className="splitflap-tile splitflap-hero relative inline-block align-baseline"
             style={{ width: `${widthOf(t)}em` }}
           >
             <span aria-hidden className="invisible">
