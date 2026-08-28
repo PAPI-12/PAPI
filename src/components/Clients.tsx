@@ -34,17 +34,16 @@ const clampFont = (name: string, baseScale: number, mobileBase: number, desktopB
 const Clients: React.FC = () => {
   return (
     <section className="relative min-h-screen bg-[#171715] overflow-x-clip py-20 md:py-28 lg:py-32">
-      {/* Reference-style murky background field */}
       <div className="absolute inset-0 bg-[#171715]" />
       <div
         aria-hidden
-        className="absolute inset-0 opacity-[0.09]"
+        className="absolute inset-0"
         style={{
-          backgroundImage:
-            "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E\")",
+          background:
+            'radial-gradient(ellipse 70% 55% at 50% 42%, rgba(245,243,238,0.05), transparent 58%), linear-gradient(90deg, rgba(23,23,21,0.92), transparent 18%, transparent 82%, rgba(23,23,21,0.92))',
         }}
       />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(245,243,238,0.06),transparent_48%),linear-gradient(90deg,rgba(23,23,21,0.98),transparent_14%,transparent_86%,rgba(23,23,21,0.98))]" />
+      <div aria-hidden className="film-grain" />
 
       <div className="relative z-10 px-4 sm:px-6 lg:px-12 xl:px-24 max-w-[1600px] mx-auto">
         <p className="text-[10px] md:text-xs font-bold tracking-[0.35em] uppercase text-[#8f8f88] mb-14 md:mb-24 lg:mb-28">

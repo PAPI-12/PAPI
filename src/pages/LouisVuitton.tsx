@@ -1,4 +1,5 @@
 import React from 'react';
+import '../styles/case-fonts.css';
 import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import LVApp from '../components/lv/LVApp';

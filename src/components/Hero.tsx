@@ -1,18 +1,47 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, useMotionValue, useSpring } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { ScribbleX, ScribbleUnderline, FloatingCross, FloatingWave } from './Scribbles';
 import SplitFlapText from './SplitFlapText';
+import { useHeroPhysics } from '../hooks/useHeroPhysics';
+
+const HeroLetters: React.FC<{ text: string }> = ({ text }) => (
+  <>
+    {Array.from(text).map((ch, i) =>
+      ch === ' ' ? (
+        <span key={i}>{' '}</span>
+      ) : (
+        <span key={i} data-hero-physics="letter" className="hero-physics-letter">
+          {ch}
+        </span>
+      ),
+    )}
+  </>
+);
 
 const Hero: React.FC = () => {
   const heroRef = useRef<HTMLDivElement>(null);
   const cursorNoteRef = useRef<HTMLDivElement>(null);
   const [isMeasured, setIsMeasured] = useState(false);
+  const [introComplete, setIntroComplete] = useState(false);
+  const [physicsEnabled, setPhysicsEnabled] = useState(false);
 
   const targetX = useMotionValue(0);
   const targetY = useMotionValue(0);
   const springX = useSpring(targetX, { stiffness: 260, damping: 28, mass: 0.6 });
   const springY = useSpring(targetY, { stiffness: 260, damping: 28, mass: 0.6 });
+
+  const handleIntroComplete = useCallback(() => {
+    setIntroComplete(true);
+  }, []);
+
+  useEffect(() => {
+    const fine = window.matchMedia('(pointer: fine)').matches && window.matchMedia('(hover: hover)').matches;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    setPhysicsEnabled(fine && !reduce);
+  }, []);
+
+  useHeroPhysics(heroRef, introComplete && physicsEnabled);
 
   useEffect(() => {
     const hero = heroRef.current;
@@ -38,7 +67,7 @@ const Hero: React.FC = () => {
 
     updateBounds();
     window.addEventListener('resize', updateBounds, { passive: true });
-    const fonts = (document as any).fonts;
+    const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
     if (fonts && fonts.ready) {
       fonts.ready.then(updateBounds).catch(() => {});
     }
@@ -83,6 +112,8 @@ const Hero: React.FC = () => {
           src="/images/Hero image.webp"
           alt="Papi Raborife"
           className="w-full h-full object-cover object-top"
+          fetchPriority="high"
+          decoding="async"
           style={{ filter: 'grayscale(100%) contrast(1.3) brightness(0.35) saturate(0.3)' }}
           onError={(e) => { e.currentTarget.style.display = 'none'; }}
         />
@@ -90,29 +121,30 @@ const Hero: React.FC = () => {
       </div>
 
       {/* Ambient floating crosses */}
-      <FloatingCross className="absolute top-[12%] left-[7%] z-20 hidden sm:block" size={38} duration={6.5} delay={0} />
-      <FloatingCross className="absolute top-[18%] right-[11%] z-20 hidden md:block" size={24} duration={5.5} delay={0.5} />
-      <FloatingCross className="absolute top-[32%] left-[15%] z-20 hidden md:block" size={28} duration={7} delay={0.3} />
-      <FloatingCross className="absolute top-[8%] right-[26%] z-20 hidden lg:block" size={18} duration={6} delay={0.9} />
-      <FloatingCross className="absolute bottom-[24%] right-[8%] z-20 hidden sm:block" size={30} duration={7.5} delay={0.2} />
-      <FloatingCross className="absolute bottom-[16%] left-[11%] z-20 hidden sm:block" size={22} duration={5.8} delay={1} />
-      <FloatingCross className="absolute top-[48%] left-[4%] z-20 hidden lg:block" size={16} duration={6.2} delay={1.2} />
-      <FloatingCross className="absolute top-[58%] right-[17%] z-20 hidden md:block" size={20} duration={6.4} delay={0.8} />
-      <FloatingCross className="absolute bottom-[38%] left-[22%] z-20 hidden lg:block" size={14} duration={5.2} delay={1.4} />
-      <FloatingCross className="absolute top-[70%] left-[40%] z-20 hidden xl:block" size={16} duration={6.8} delay={0.6} />
+      <FloatingCross className="absolute top-[12%] left-[7%] z-20 hidden sm:block" size={38} duration={6.5} delay={0} frozen={introComplete} />
+      <FloatingCross className="absolute top-[18%] right-[11%] z-20 hidden md:block" size={24} duration={5.5} delay={0.5} frozen={introComplete} />
+      <FloatingCross className="absolute top-[32%] left-[15%] z-20 hidden md:block" size={28} duration={7} delay={0.3} frozen={introComplete} />
+      <FloatingCross className="absolute top-[8%] right-[26%] z-20 hidden lg:block" size={18} duration={6} delay={0.9} frozen={introComplete} />
+      <FloatingCross className="absolute bottom-[24%] right-[8%] z-20 hidden sm:block" size={30} duration={7.5} delay={0.2} frozen={introComplete} />
+      <FloatingCross className="absolute bottom-[16%] left-[11%] z-20 hidden sm:block" size={22} duration={5.8} delay={1} frozen={introComplete} />
+      <FloatingCross className="absolute top-[48%] left-[4%] z-20 hidden lg:block" size={16} duration={6.2} delay={1.2} frozen={introComplete} />
+      <FloatingCross className="absolute top-[58%] right-[17%] z-20 hidden md:block" size={20} duration={6.4} delay={0.8} frozen={introComplete} />
+      <FloatingCross className="absolute bottom-[38%] left-[22%] z-20 hidden lg:block" size={14} duration={5.2} delay={1.4} frozen={introComplete} />
+      <FloatingCross className="absolute top-[70%] left-[40%] z-20 hidden xl:block" size={16} duration={6.8} delay={0.6} frozen={introComplete} />
 
       {/* Ambient floating waves */}
-      <FloatingWave className="absolute top-[24%] right-[15%] z-20 hidden md:block" width={140} duration={7.5} delay={0} />
-      <FloatingWave className="absolute top-[44%] left-[3%] z-20 hidden lg:block" width={110} duration={8.5} delay={0.4} />
-      <FloatingWave className="absolute bottom-[32%] right-[5%] z-20 hidden md:block" width={130} duration={7} delay={0.9} />
-      <FloatingWave className="absolute bottom-[14%] left-[17%] z-20 hidden sm:block" width={100} duration={8} delay={0.6} />
-      <FloatingWave className="absolute top-[62%] right-[23%] z-20 hidden lg:block" width={90} duration={6.5} delay={1.1} />
+      <FloatingWave className="absolute top-[24%] right-[15%] z-20 hidden md:block" width={140} duration={7.5} delay={0} frozen={introComplete} />
+      <FloatingWave className="absolute top-[44%] left-[3%] z-20 hidden lg:block" width={110} duration={8.5} delay={0.4} frozen={introComplete} />
+      <FloatingWave className="absolute bottom-[32%] right-[5%] z-20 hidden md:block" width={130} duration={7} delay={0.9} frozen={introComplete} />
+      <FloatingWave className="absolute bottom-[14%] left-[17%] z-20 hidden sm:block" width={100} duration={8} delay={0.6} frozen={introComplete} />
+      <FloatingWave className="absolute top-[62%] right-[23%] z-20 hidden lg:block" width={90} duration={6.5} delay={1.1} frozen={introComplete} />
 
       {/* Static scribbles for depth */}
-      <ScribbleX className="absolute top-[20%] left-[28%] w-6 h-6 z-20 opacity-50 rotate-12 hidden md:block" />
-      <ScribbleUnderline className="absolute top-[28%] right-[22%] w-28 h-3 z-20 opacity-60 rotate-3 hidden md:block" />
+      <ScribbleX data-hero-physics="deco" className="absolute top-[20%] left-[28%] w-6 h-6 z-20 opacity-50 rotate-12 hidden md:block" />
+      <ScribbleUnderline data-hero-physics="deco" className="absolute top-[28%] right-[22%] w-28 h-3 z-20 opacity-60 rotate-3 hidden md:block" />
 
       <div className="relative z-10 text-center px-4 w-full max-w-[96vw]">
+        <h1 className="sr-only">CRAFTING AWESOMENESS SINCE 2015</h1>
         <motion.p
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -124,31 +156,39 @@ const Hero: React.FC = () => {
 
         <div className="relative flex flex-col items-center justify-center w-full">
           <motion.h1
+            aria-hidden="true"
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.9, ease: 'easeOut' }}
-            className="font-display text-[#f5f3ee] text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em]"
+            className="font-display text-[#f5f3ee] text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] whitespace-nowrap"
           >
-            CRAFTING
+            <HeroLetters text="CRAFTING" />
           </motion.h1>
 
           <motion.h1
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.6, delay: 0.15 }}
-            className="font-display text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] max-w-full overflow-hidden"
+            className="font-display text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] max-w-full whitespace-nowrap"
             aria-hidden="true"
           >
-            <SplitFlapText target="AWESOMENESS" startDelay={650} step={130} />
+            <SplitFlapText
+              target="AWESOMENESS"
+              startDelay={815}
+              step={163}
+              interval={70}
+              onComplete={handleIntroComplete}
+            />
           </motion.h1>
 
           <motion.h1
+            aria-hidden="true"
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.9, ease: 'easeOut', delay: 0.3 }}
-            className="font-display text-stroke text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em]"
+            className="font-display text-stroke text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] whitespace-nowrap"
           >
-            SINCE 2015
+            <HeroLetters text="SINCE 2015" />
           </motion.h1>
         </div>
       </div>
