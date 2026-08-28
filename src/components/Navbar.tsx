@@ -1,0 +1,77 @@
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Link, useLocation } from 'react-router-dom';
+import { Menu, X } from 'lucide-react';
+
+const Navbar: React.FC = () => {
+  const [isScrolled, setIsScrolled] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const location = useLocation();
+  useEffect(() => {
+    let ticking = false;
+    const handleScroll = () => {
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          setIsScrolled(window.scrollY > 50);
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => { setIsMobileMenuOpen(false); }, [location]);
+  const navLinks = [
+    { path: '/', label: 'Home' },
+    { path: '/about', label: 'About' },
+    { path: '/work', label: 'Work' },
+    { path: '/resume', label: 'Resume' },
+    { path: '/contact', label: 'Contact' },
+  ];
+  return (
+    <>
+      <motion.nav id="main-nav" initial={{ y: -100 }} animate={{ y: 0 }} className={`fixed top-0 left-0 w-full z-[50] transition-all duration-300 ${isScrolled ? 'bg-[#171715]/95 backdrop-blur-md py-4' : 'bg-transparent py-6 md:py-8'}`}>
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-12 flex justify-between items-center">
+          <Link to="/" className="flex items-center gap-3 group">
+            <svg width="40" height="40" viewBox="0 0 40 40" fill="none" className="transition-transform group-hover:rotate-12">
+              <rect x="2" y="2" width="36" height="36" rx="18" stroke="#D7FF4F" strokeWidth="1.5" />
+              <path d="M20 8L25 18H15L20 8Z" fill="#F5F3EE" />
+              <path d="M20 32L15 22H25L20 32Z" fill="#D7C4AA" />
+              <circle cx="20" cy="20" r="3" fill="#D7FF4F" />
+            </svg>
+            <div className="hidden sm:block text-left">
+              <span className="font-display text-lg md:text-xl text-[#f5f3ee] block leading-none">PAPI</span>
+              <span className="text-[10px] text-[#8f8f88] tracking-wider uppercase">RABORIFE</span>
+            </div>
+          </Link>
+          <div className="hidden md:flex items-center gap-8">
+            {navLinks.map((link) => (
+              <Link key={link.path} to={link.path} className={`text-xs font-bold uppercase tracking-[0.2em] transition-colors ${location.pathname === link.path ? 'text-[#d7ff4f]' : 'text-[#8f8f88] hover:text-[#f5f3ee]'}`}>{link.label}</Link>
+            ))}
+          </div>
+          <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="md:hidden w-10 h-10 flex items-center justify-center text-[#f5f3ee] z-50" aria-label="Toggle menu">{isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}</button>
+        </div>
+      </motion.nav>
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <motion.div initial={{ opacity: 0, x: '100%' }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }} className="fixed inset-0 z-[45] bg-[#171715] pt-32 px-8 md:hidden">
+            <div className="flex flex-col gap-8">
+              {navLinks.map((link, i) => (
+                <motion.div key={link.path} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.1 }}>
+                  <Link to={link.path} className={`block text-4xl font-display ${location.pathname === link.path ? 'text-[#d7ff4f]' : 'text-[#f5f3ee]'}`}>{link.label}</Link>
+                </motion.div>
+              ))}
+              <div className="mt-12 pt-12 border-t border-white/10">
+                <p className="text-[10px] text-[#8f8f88] uppercase tracking-[0.3em] mb-4">Connect</p>
+                <a href="mailto:papiraborife@gmail.com" className="text-xl text-[#f5f3ee] font-display">papiraborife@gmail.com</a>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+};
+export default Navbar;
