@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
 
 const Navbar: React.FC = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
-  const navigate = useNavigate();
-
   useEffect(() => {
     let ticking = false;
     const handleScroll = () => {
@@ -25,23 +23,6 @@ const Navbar: React.FC = () => {
   }, []);
 
   useEffect(() => { setIsMobileMenuOpen(false); }, [location]);
-
-  const goToHero = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsMobileMenuOpen(false);
-    const scrollHero = () => {
-      const hero = document.getElementById('hero');
-      if (hero) hero.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      else window.scrollTo({ top: 0, behavior: 'smooth' });
-    };
-    if (location.pathname === '/') {
-      scrollHero();
-      return;
-    }
-    navigate('/');
-    window.setTimeout(scrollHero, 80);
-  };
-
   const navLinks = [
     { path: '/', label: 'Home' },
     { path: '/about', label: 'About' },
@@ -49,12 +30,11 @@ const Navbar: React.FC = () => {
     { path: '/resume', label: 'Resume' },
     { path: '/contact', label: 'Contact' },
   ];
-
   return (
     <>
       <motion.nav id="main-nav" initial={{ y: -100 }} animate={{ y: 0 }} className={`fixed top-0 left-0 w-full z-[50] transition-all duration-300 ${isScrolled ? 'bg-[#171715]/95 backdrop-blur-md py-4' : 'bg-transparent py-6 md:py-8'}`}>
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-12 flex justify-between items-center">
-          <Link to="/" onClick={goToHero} className="flex items-center gap-3 group cursor-pointer" aria-label="PAPI RABORIFE — back to hero">
+          <Link to="/" className="flex items-center gap-3 group">
             <svg width="40" height="40" viewBox="0 0 40 40" fill="none" className="transition-transform group-hover:rotate-12">
               <rect x="2" y="2" width="36" height="36" rx="18" stroke="#D7FF4F" strokeWidth="1.5" />
               <path d="M20 8L25 18H15L20 8Z" fill="#F5F3EE" />
@@ -94,5 +74,4 @@ const Navbar: React.FC = () => {
     </>
   );
 };
-
 export default Navbar;
