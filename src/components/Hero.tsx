@@ -1,9 +1,11 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { motion, useMotionValue, useSpring } from 'framer-motion';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useMotionValue, useSpring } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { ScribbleX, ScribbleUnderline, FloatingCross, FloatingWave } from './Scribbles';
 import SplitFlapText from './SplitFlapText';
 import { useHeroPhysics } from '../hooks/useHeroPhysics';
+
+const ORBIT_COPY = 'CULTURE LED CREATIVE · ';
 
 const HeroLetters: React.FC<{ text: string }> = ({ text }) => (
   <>
@@ -21,15 +23,17 @@ const HeroLetters: React.FC<{ text: string }> = ({ text }) => (
 
 const Hero: React.FC = () => {
   const heroRef = useRef<HTMLDivElement>(null);
-  const cursorNoteRef = useRef<HTMLDivElement>(null);
-  const [isMeasured, setIsMeasured] = useState(false);
+  const colorImgRef = useRef<HTMLImageElement>(null);
+  const scratchRef = useRef<HTMLCanvasElement>(null);
+  const orbitRef = useRef<HTMLDivElement>(null);
+  const orbitPathId = useId().replace(/:/g, '');
   const [introComplete, setIntroComplete] = useState(false);
   const [physicsEnabled, setPhysicsEnabled] = useState(false);
 
   const targetX = useMotionValue(0);
   const targetY = useMotionValue(0);
-  const springX = useSpring(targetX, { stiffness: 260, damping: 28, mass: 0.6 });
-  const springY = useSpring(targetY, { stiffness: 260, damping: 28, mass: 0.6 });
+  const springX = useSpring(targetX, { stiffness: 360, damping: 32, mass: 0.4 });
+  const springY = useSpring(targetY, { stiffness: 360, damping: 32, mass: 0.4 });
 
   const handleIntroComplete = useCallback(() => {
     setIntroComplete(true);
@@ -41,134 +45,240 @@ const Hero: React.FC = () => {
     setPhysicsEnabled(fine && !reduce);
   }, []);
 
+  useEffect(() => {
+    const t = window.setTimeout(() => setIntroComplete(true), 3800);
+    return () => window.clearTimeout(t);
+  }, []);
+
   useHeroPhysics(heroRef, introComplete && physicsEnabled);
 
   useEffect(() => {
     const hero = heroRef.current;
     if (!hero) return;
 
-    let heroBounds = hero.getBoundingClientRect();
-    let noteWidth = cursorNoteRef.current?.offsetWidth || 180;
-    let noteHeight = cursorNoteRef.current?.offsetHeight || 32;
+    let radius = 32;
+    let raf = 0;
+    let offset = 0;
+    let lastStampX = -9999;
+    let lastStampY = -9999;
+    let scratchReady = false;
 
-    const updateBounds = () => {
-      if (!hero) return;
-      heroBounds = hero.getBoundingClientRect();
-      if (cursorNoteRef.current) {
-        noteWidth = cursorNoteRef.current.offsetWidth || 180;
-        noteHeight = cursorNoteRef.current.offsetHeight || 32;
+    const measureO = () => {
+      const o = hero.querySelector('[data-char="O"]') as HTMLElement | null;
+      if (o) {
+        const r = o.getBoundingClientRect();
+        radius = Math.max(14, (r.width / 2) - 3);
+      } else {
+        radius = 30;
       }
-      const centerX = (heroBounds.width - noteWidth) / 2;
-      const centerY = (heroBounds.height - noteHeight) / 2;
-      targetX.set(centerX);
-      targetY.set(centerY);
-      setIsMeasured(true);
     };
 
-    updateBounds();
-    window.addEventListener('resize', updateBounds, { passive: true });
-    const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
-    if (fonts && fonts.ready) {
-      fonts.ready.then(updateBounds).catch(() => {});
-    }
+    const paintScratchBase = () => {
+      const canvas = scratchRef.current;
+      const img = colorImgRef.current;
+      if (!canvas) return;
+      const w = hero.clientWidth;
+      const h = hero.clientHeight;
+      if (w < 8 || h < 8) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.clearRect(0, 0, w, h);
+
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.filter = 'grayscale(100%) contrast(1.3) brightness(0.35) saturate(0.3)';
+        const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
+        const dw = img.naturalWidth * scale;
+        const dh = img.naturalHeight * scale;
+        ctx.drawImage(img, (w - dw) / 2, 0, dw, dh);
+        ctx.filter = 'none';
+      } else {
+        ctx.fillStyle = '#171715';
+        ctx.fillRect(0, 0, w, h);
+      }
+      const g = ctx.createLinearGradient(0, 0, 0, h);
+      g.addColorStop(0, 'rgba(23,23,21,0.5)');
+      g.addColorStop(0.3, 'rgba(23,23,21,0.3)');
+      g.addColorStop(1, 'rgba(23,23,21,0.88)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+      scratchReady = true;
+      lastStampX = -9999;
+      lastStampY = -9999;
+    };
+
+    const stampScratch = (x: number, y: number) => {
+      if (!scratchReady) return;
+      const canvas = scratchRef.current;
+      if (!canvas) return;
+      const dx = x - lastStampX;
+      const dy = y - lastStampY;
+      if (dx * dx + dy * dy < 3) return;
+      lastStampX = x;
+      lastStampY = y;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,1)';
+      ctx.fill();
+    };
+
+    const layoutOrbit = () => {
+      const orbit = orbitRef.current;
+      if (!orbit) return;
+      measureO();
+      const pad = 16;
+      const size = radius * 2 + pad;
+      const c = size / 2;
+      orbit.style.width = `${size}px`;
+      orbit.style.height = `${size}px`;
+      const svg = orbit.querySelector('svg');
+      const path = orbit.querySelector('path');
+      const text = orbit.querySelector('text');
+      if (svg) {
+        svg.setAttribute('width', String(size));
+        svg.setAttribute('height', String(size));
+        svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
+      }
+      if (path) {
+        path.setAttribute('d', `M ${c} ${c - radius} A ${radius} ${radius} 0 1 1 ${c - 0.01} ${c - radius}`);
+      }
+      if (text) {
+        const font = Math.max(7, Math.min(13, (2 * Math.PI * radius) / 24));
+        text.setAttribute('font-size', String(font));
+      }
+    };
+
+    const centerNote = () => {
+      const bounds = hero.getBoundingClientRect();
+      measureO();
+      layoutOrbit();
+      targetX.set(bounds.width / 2);
+      targetY.set(bounds.height / 2);
+    };
+
+    centerNote();
+    paintScratchBase();
 
     const handlePointerMove = (e: PointerEvent) => {
-      const padding = 16;
-      const localMouseX = e.clientX - heroBounds.left;
-      const localMouseY = e.clientY - heroBounds.top;
-
-      const boundedX = Math.max(padding, Math.min(localMouseX + 16, heroBounds.width - noteWidth - padding));
-      const boundedY = Math.max(padding, Math.min(localMouseY + 16, heroBounds.height - noteHeight - padding));
-
-      targetX.set(boundedX);
-      targetY.set(boundedY);
+      if (e.pointerType === 'touch') return;
+      const bounds = hero.getBoundingClientRect();
+      const localX = e.clientX - bounds.left;
+      const localY = e.clientY - bounds.top;
+      const inside = localX >= 0 && localY >= 0 && localX <= bounds.width && localY <= bounds.height;
+      if (!inside) return;
+      targetX.set(localX);
+      targetY.set(localY);
     };
 
-    const handlePointerLeave = () => {
-      const centerX = (heroBounds.width - noteWidth) / 2;
-      const centerY = (heroBounds.height - noteHeight) / 2;
-      targetX.set(centerX);
-      targetY.set(centerY);
+    const onResize = () => {
+      centerNote();
+      paintScratchBase();
     };
 
-    hero.addEventListener('pointermove', handlePointerMove, { passive: true });
-    hero.addEventListener('pointerleave', handlePointerLeave, { passive: true });
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('resize', onResize, { passive: true });
+    const img = colorImgRef.current;
+    if (img) {
+      if (img.complete) paintScratchBase();
+      else img.addEventListener('load', paintScratchBase);
+    }
+
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const cx = springX.get();
+      const cy = springY.get();
+      const orbit = orbitRef.current;
+      if (orbit) {
+        const pad = 16;
+        const size = radius * 2 + pad;
+        orbit.style.transform = `translate3d(${cx - size / 2}px, ${cy - size / 2}px, 0)`;
+        const pathText = orbit.querySelector('textPath');
+        if (pathText) {
+          offset = (offset + 0.15) % 100;
+          pathText.setAttribute('startOffset', `${offset}%`);
+        }
+      }
+      stampScratch(cx, cy);
+    };
+    raf = requestAnimationFrame(tick);
 
     return () => {
-      window.removeEventListener('resize', updateBounds);
-      hero.removeEventListener('pointermove', handlePointerMove);
-      hero.removeEventListener('pointerleave', handlePointerLeave);
+      cancelAnimationFrame(raf);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('resize', onResize);
+      img?.removeEventListener('load', paintScratchBase);
     };
-  }, [targetX, targetY]);
-
+  }, [targetX, targetY, springX, springY]);
 
   return (
     <section
+      id="hero"
       ref={heroRef}
       className="relative h-[100svh] min-h-[540px] flex items-center justify-center overflow-hidden bg-[#171715]"
     >
       <div className="absolute inset-0 z-0">
         <img
+          ref={colorImgRef}
           src="/images/Hero image.webp"
           alt="Papi Raborife"
           className="w-full h-full object-cover object-top"
           fetchPriority="high"
           decoding="async"
-          style={{ filter: 'grayscale(100%) contrast(1.3) brightness(0.35) saturate(0.3)' }}
           onError={(e) => { e.currentTarget.style.display = 'none'; }}
         />
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(23,23,21,0.5),rgba(23,23,21,0.3)30%,rgba(23,23,21,0.88))]" />
+        <canvas
+          ref={scratchRef}
+          className="absolute inset-0 h-full w-full pointer-events-none z-10"
+          aria-hidden
+        />
       </div>
 
-      {/* Ambient floating crosses */}
-      <FloatingCross className="absolute top-[12%] left-[7%] z-20 hidden sm:block" size={38} duration={6.5} delay={0} frozen={introComplete} />
-      <FloatingCross className="absolute top-[18%] right-[11%] z-20 hidden md:block" size={24} duration={5.5} delay={0.5} frozen={introComplete} />
-      <FloatingCross className="absolute top-[32%] left-[15%] z-20 hidden md:block" size={28} duration={7} delay={0.3} frozen={introComplete} />
-      <FloatingCross className="absolute top-[8%] right-[26%] z-20 hidden lg:block" size={18} duration={6} delay={0.9} frozen={introComplete} />
-      <FloatingCross className="absolute bottom-[24%] right-[8%] z-20 hidden sm:block" size={30} duration={7.5} delay={0.2} frozen={introComplete} />
-      <FloatingCross className="absolute bottom-[16%] left-[11%] z-20 hidden sm:block" size={22} duration={5.8} delay={1} frozen={introComplete} />
-      <FloatingCross className="absolute top-[48%] left-[4%] z-20 hidden lg:block" size={16} duration={6.2} delay={1.2} frozen={introComplete} />
-      <FloatingCross className="absolute top-[58%] right-[17%] z-20 hidden md:block" size={20} duration={6.4} delay={0.8} frozen={introComplete} />
-      <FloatingCross className="absolute bottom-[38%] left-[22%] z-20 hidden lg:block" size={14} duration={5.2} delay={1.4} frozen={introComplete} />
-      <FloatingCross className="absolute top-[70%] left-[40%] z-20 hidden xl:block" size={16} duration={6.8} delay={0.6} frozen={introComplete} />
+      <FloatingCross className="absolute top-[12%] left-[7%] z-25 hidden sm:block" size={38} duration={6.5} delay={0} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute top-[18%] right-[11%] z-25 hidden md:block" size={24} duration={5.5} delay={0.5} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute top-[32%] left-[15%] z-25 hidden md:block" size={28} duration={7} delay={0.3} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute top-[8%] right-[26%] z-25 hidden lg:block" size={18} duration={6} delay={0.9} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute bottom-[24%] right-[8%] z-25 hidden sm:block" size={30} duration={7.5} delay={0.2} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute bottom-[16%] left-[11%] z-25 hidden sm:block" size={22} duration={5.8} delay={1} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute top-[48%] left-[4%] z-25 hidden lg:block" size={16} duration={6.2} delay={1.2} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute top-[58%] right-[17%] z-25 hidden md:block" size={20} duration={6.4} delay={0.8} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute bottom-[38%] left-[22%] z-25 hidden lg:block" size={14} duration={5.2} delay={1.4} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute top-[70%] left-[40%] z-25 hidden xl:block" size={16} duration={6.8} delay={0.6} frozen={introComplete && physicsEnabled} />
 
-      {/* Ambient floating waves */}
-      <FloatingWave className="absolute top-[24%] right-[15%] z-20 hidden md:block" width={140} duration={7.5} delay={0} frozen={introComplete} />
-      <FloatingWave className="absolute top-[44%] left-[3%] z-20 hidden lg:block" width={110} duration={8.5} delay={0.4} frozen={introComplete} />
-      <FloatingWave className="absolute bottom-[32%] right-[5%] z-20 hidden md:block" width={130} duration={7} delay={0.9} frozen={introComplete} />
-      <FloatingWave className="absolute bottom-[14%] left-[17%] z-20 hidden sm:block" width={100} duration={8} delay={0.6} frozen={introComplete} />
-      <FloatingWave className="absolute top-[62%] right-[23%] z-20 hidden lg:block" width={90} duration={6.5} delay={1.1} frozen={introComplete} />
+      <FloatingWave className="absolute top-[24%] right-[15%] z-25 hidden md:block" width={140} duration={7.5} delay={0} frozen={introComplete && physicsEnabled} />
+      <FloatingWave className="absolute top-[44%] left-[3%] z-25 hidden lg:block" width={110} duration={8.5} delay={0.4} frozen={introComplete && physicsEnabled} />
+      <FloatingWave className="absolute bottom-[32%] right-[5%] z-25 hidden md:block" width={130} duration={7} delay={0.9} frozen={introComplete && physicsEnabled} />
+      <FloatingWave className="absolute bottom-[14%] left-[17%] z-25 hidden sm:block" width={100} duration={8} delay={0.6} frozen={introComplete && physicsEnabled} />
+      <FloatingWave className="absolute top-[62%] right-[23%] z-25 hidden lg:block" width={90} duration={6.5} delay={1.1} frozen={introComplete && physicsEnabled} />
 
-      {/* Static scribbles for depth */}
-      <ScribbleX data-hero-physics="deco" className="absolute top-[20%] left-[28%] w-6 h-6 z-20 opacity-50 rotate-12 hidden md:block" />
-      <ScribbleUnderline data-hero-physics="deco" className="absolute top-[28%] right-[22%] w-28 h-3 z-20 opacity-60 rotate-3 hidden md:block" />
+      <ScribbleX data-hero-physics="deco" className="absolute top-[20%] left-[28%] w-6 h-6 z-25 opacity-50 rotate-12 hidden md:block" />
+      <ScribbleUnderline data-hero-physics="deco" className="absolute top-[28%] right-[22%] w-28 h-3 z-25 opacity-60 rotate-3 hidden md:block" />
 
-      <div className="relative z-10 text-center px-4 w-full max-w-[96vw]">
+      <div className="relative z-20 text-center px-4 w-full max-w-[96vw]">
         <h1 className="sr-only">CRAFTING AWESOMENESS SINCE 2015</h1>
-        <motion.p
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
-          className="text-[10px] sm:text-xs md:text-sm font-bold tracking-[0.35em] uppercase mb-6 md:mb-8 text-[#9a9a93]"
-        >
+        <p className="text-[10px] sm:text-xs md:text-sm font-bold tracking-[0.35em] uppercase mb-6 md:mb-8 text-[#9a9a93]">
           Papi Raborife
-        </motion.p>
+        </p>
 
         <div className="relative flex flex-col items-center justify-center w-full">
-          <motion.h1
+          <h1
             aria-hidden="true"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.9, ease: 'easeOut' }}
             className="font-display text-[#f5f3ee] text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] whitespace-nowrap"
           >
             <HeroLetters text="CRAFTING" />
-          </motion.h1>
+          </h1>
 
-          <motion.h1
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.6, delay: 0.15 }}
+          <h1
             className="font-display text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] max-w-full whitespace-nowrap"
             aria-hidden="true"
           >
@@ -179,33 +289,37 @@ const Hero: React.FC = () => {
               interval={70}
               onComplete={handleIntroComplete}
             />
-          </motion.h1>
+          </h1>
 
-          <motion.h1
+          <h1
             aria-hidden="true"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.9, ease: 'easeOut', delay: 0.3 }}
             className="font-display text-stroke text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] whitespace-nowrap"
           >
             <HeroLetters text="SINCE 2015" />
-          </motion.h1>
+          </h1>
         </div>
       </div>
 
-      {/* "culture led creative" — absolutely positioned inside the hero,
-          centred at rest, clamped to the hero rectangle so it can never
-          escape the section border. */}
-      <motion.div
-        ref={cursorNoteRef}
-        className="absolute top-0 left-0 z-30 pointer-events-none hand-note text-[#d7ff4f] text-base sm:text-lg md:text-2xl font-bold whitespace-nowrap mix-blend-difference"
-        style={{ x: springX, y: springY }}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: isMeasured ? 1 : 0 }}
-        transition={{ opacity: { duration: 0.3 } }}
+      <div
+        ref={orbitRef}
+        className="absolute top-0 left-0 z-30 pointer-events-none hidden md:block"
+        style={{ willChange: 'transform' }}
+        aria-hidden
       >
-        culture led creative
-      </motion.div>
+        <svg className="overflow-visible">
+          <defs>
+            <path id={orbitPathId} d="M 40 4 A 36 36 0 1 1 39.99 4" />
+          </defs>
+          <text
+            fill="#d7ff4f"
+            fontFamily="'JetBrains Mono', ui-monospace, monospace"
+            fontWeight="700"
+            letterSpacing="1.8"
+          >
+            <textPath href={`#${orbitPathId}`}>{ORBIT_COPY}{ORBIT_COPY}</textPath>
+          </text>
+        </svg>
+      </div>
 
       <div className="absolute left-4 sm:left-6 bottom-10 md:bottom-12 hidden md:flex flex-col gap-4 text-[10px] md:text-xs font-bold text-[#8f8f88] z-30">
         <Link to="/resume" className="hover:text-[#f5f3ee] transform -rotate-90 tracking-[0.2em]">
