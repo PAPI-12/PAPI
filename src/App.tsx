@@ -6,7 +6,6 @@ import Navbar from './components/Navbar';
 import CustomCursor from './components/CustomCursor';
 import Home from './pages/Home';
 import ErrorBoundary from './components/ErrorBoundary';
-import { useSmoothScroll } from './hooks/useSmoothScroll';
 
 const Work = lazy(() => import('./pages/Work'));
 const About = lazy(() => import('./pages/About'));
@@ -34,7 +33,6 @@ const PageFallback = () => (
 );
 
 const AppContent: React.FC = () => {
-  useSmoothScroll();
   const { scrollYProgress } = useScroll();
   const scaleX = useSpring(scrollYProgress, { stiffness: 100, damping: 30, restDelta: 0.001 });
   return (
