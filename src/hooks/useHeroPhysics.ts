@@ -50,18 +50,32 @@ type Body = {
 };
 
 /** Per-second velocity retained. Near 1 = space-like drift. */
-const DRAG = 0.62;
-const ANGULAR_DRAG = 0.5;
-/** Wall restitution. */
-const BOUNCE = 0.78;
-const MAX_SPEED = 4200;
-const MAX_VR = 520;
+const DRAG = 0.2;
+const ANGULAR_DRAG = 0.12;
+/** Wall restitution. Low enough that a letter cannot ping-pong for seconds. */
+const BOUNCE = 0.42;
+const MAX_SPEED = 2600;
+const MAX_VR = 260;
 /** Fixed physics step (seconds). */
 const STEP = 1 / 120;
 const MAX_STEPS = 5;
 /** Cursor speed (px/s) -> impulse scaling. */
-const IMPULSE = 1.05;
+const IMPULSE = 0.85;
 const MIN_IMPULSE_SPEED = 40;
+
+/* ── Regrouping ───────────────────────────────────────────────────────────
+   Zero-g drift reads as "broken" if it never ends, so after the pointer has
+   been still for IDLE_DELAY the bodies ease back into the headline. The pull
+   ramps in over REGROUP_RAMP rather than switching on, so letters glide home
+   instead of snapping. Any new cursor impulse cancels it instantly.        */
+const IDLE_DELAY = 1.1;
+const REGROUP_RAMP = 1.3;
+/** Spring constant and damping used while regrouping. */
+const HOME_STIFF = 26;
+const HOME_DAMP = 8.5;
+/** Below this offset/velocity a regrouping body is snapped home and parked. */
+const SETTLE_DIST = 0.4;
+const SETTLE_SPEED = 4;
 
 const clamp = (v: number, min: number, max: number) => (v < min ? min : v > max ? max : v);
 
@@ -150,6 +164,8 @@ export function useHeroPhysics(
     let curY = 0;
     let ringR = 24;
     let cursorLive = false;
+    /** Seconds since the pointer last moved meaningfully. Drives regrouping. */
+    let idleFor = 0;
 
     const syncBox = () => {
       const r = hero.getBoundingClientRect();
@@ -271,6 +287,9 @@ export function useHeroPhysics(
       const speed = travel / Math.max(dt, 1e-4);
       if (speed < MIN_IMPULSE_SPEED) return;
 
+      // A real move: cancel any regrouping in progress and re-arm the timer.
+      idleFor = 0;
+
       const sweepR = Math.max(ringR, 8);
       const nx = travel > 1e-4 ? dx / travel : 0;
       const ny = travel > 1e-4 ? dy / travel : 0;
@@ -301,7 +320,11 @@ export function useHeroPhysics(
 
         // Torque from the off-centre component of the hit.
         b.vr += clamp((rx * ny - ry * nx) * power * 0.05, -MAX_VR, MAX_VR);
-        b.moved = true;
+        // Waking a retired body: re-arm compositing before it moves again.
+        if (!b.moved) {
+          b.moved = true;
+          b.el.style.willChange = 'transform';
+        }
       }
     };
 
@@ -309,9 +332,23 @@ export function useHeroPhysics(
       const dragF = Math.pow(DRAG, dt);
       const angDragF = Math.pow(ANGULAR_DRAG, dt);
 
+      // 0 while the visitor is active, ramping to 1 once the pointer has been
+      // still long enough. Scales the homing spring so it fades in smoothly.
+      const pull = clamp((idleFor - IDLE_DELAY) / REGROUP_RAMP, 0, 1);
+
       for (let i = 0; i < bodies.length; i++) {
         const b = bodies[i];
         if (!b.moved) continue;
+
+        if (pull > 0) {
+          // Critically-damped pull back to the letter's home position and
+          // rotation. This is what makes the headline reassemble itself.
+          const k = HOME_STIFF * pull;
+          const c = HOME_DAMP * pull;
+          b.vx += (-k * b.x - c * b.vx) * dt;
+          b.vy += (-k * b.y - c * b.vy) * dt;
+          b.vr += (-k * b.rot - c * b.vr) * dt;
+        }
 
         b.vx *= dragF;
         b.vy *= dragF;
@@ -354,9 +391,22 @@ export function useHeroPhysics(
         b.x = px - b.homeX;
         b.y = py - b.homeY;
 
-        // Kill imperceptible drift so bodies come to a clean stop instead of
-        // jittering forever at sub-pixel speeds.
-        if (Math.hypot(b.vx, b.vy) < 1.5 && Math.abs(b.vr) < 1) {
+        const speed = Math.hypot(b.vx, b.vy);
+
+        if (pull > 0) {
+          // Regrouping: once the body is home and slow, snap it exactly onto
+          // its home position and retire it. `moved = false` takes it out of
+          // the integrate/render loops entirely, so a settled headline costs
+          // nothing per frame and cannot jitter.
+          if (Math.hypot(b.x, b.y) < SETTLE_DIST && Math.abs(b.rot) < 0.4 && speed < SETTLE_SPEED) {
+            b.x = 0; b.y = 0; b.rot = 0;
+            b.vx = 0; b.vy = 0; b.vr = 0;
+            b.moved = false;
+            b.el.style.transform = '';
+            b.el.style.willChange = '';
+          }
+        } else if (speed < 1.5 && Math.abs(b.vr) < 1) {
+          // Not regrouping yet: just kill imperceptible sub-pixel drift.
           b.vx = 0; b.vy = 0; b.vr = 0;
         }
       }
@@ -397,6 +447,7 @@ export function useHeroPhysics(
       // One sweep per rendered frame, applied once, then simulated forward.
       const hasSegment = sampleCursor();
       applyCursor(Math.max(elapsed, 1e-4), hasSegment);
+      idleFor += elapsed;
 
       let steps = 0;
       while (accumulator >= STEP && steps < MAX_STEPS) {

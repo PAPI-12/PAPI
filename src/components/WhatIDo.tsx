@@ -150,10 +150,11 @@ const WhatIDo: React.FC = () => {
           scale = 1 / (1 + depth * 0.42);
           opacity = Math.max(0, 1 - depth * 0.52);
         } else {
-          // Already passed: continues toward the viewer and fades out.
+          // Already passed: rushes toward the viewer, growing to fill the
+          // section as it goes, and fades out as it overflows the frame.
           const d = -depth;
-          scale = 1 + d * 0.55;
-          opacity = Math.max(0, 1 - d * 1.35);
+          scale = 1 + d * 0.95;
+          opacity = Math.max(0, 1 - d * 1.15);
         }
 
         // The final card does not fly past — it stays front and centre to be
@@ -167,7 +168,9 @@ const WhatIDo: React.FC = () => {
             const gutter = Math.sin(vanishRaw * 34) * 0.5 + 0.5;
             const brownout = (1 - vanishRaw) * (0.55 + gutter * 0.45);
             opacity *= Math.max(0, brownout);
-            scale *= 1 + vanishRaw * 0.18;
+            // Swells to fill the section as the charge dumps out, so it dies
+            // large rather than shrinking away.
+            scale *= 1 + vanishRaw * 0.42;
           }
         }
 
@@ -539,7 +542,7 @@ const WhatIDo: React.FC = () => {
               >
                 <h3
                   ref={(el) => { titleRefs.current[i] = el; }}
-                  className="font-display text-center text-[8.4vw] sm:text-[8vw] md:text-[7.6vw] lg:text-[6.8vw] leading-[0.95] tracking-[-0.04em] whitespace-nowrap"
+                  className="font-display text-center text-[9.6vw] sm:text-[9.2vw] md:text-[9vw] lg:text-[8.5vw] leading-[0.95] tracking-[-0.04em] whitespace-nowrap"
                   style={{ color: skill.color }}
                 >
                   {Array.from(skill.title).map((ch, li) => (
@@ -554,7 +557,7 @@ const WhatIDo: React.FC = () => {
         {/* Copy for the front-most skill. */}
         {/* Skill copy, parked directly beneath the stack rather than floating
             near the bottom edge, so title and caption read as one unit. */}
-        <div className="pointer-events-none absolute left-0 right-0 top-1/2 z-20 mt-[7vw] md:mt-[5.6vw] lg:mt-[5vw] h-10">
+        <div className="pointer-events-none absolute left-0 right-0 top-1/2 z-20 mt-[6.2vw] md:mt-[5.8vw] lg:mt-[5.4vw] h-10">
           {SKILLS.map((skill, i) => (
             <p
               key={skill.note}
@@ -585,7 +588,7 @@ const WhatIDo: React.FC = () => {
             band between the content and the bottom of the section. */}
         <p
           ref={cueRef}
-          className="hand-note absolute left-1/2 top-1/2 mt-[13vw] md:mt-[10vw] lg:mt-[9vw] -translate-x-1/2 text-[#d7c4aa] text-xs sm:text-sm md:text-xl rotate-[-2deg] whitespace-nowrap z-20"
+          className="hand-note absolute left-1/2 top-1/2 mt-[10.5vw] md:mt-[9.4vw] lg:mt-[8.6vw] -translate-x-1/2 text-[#d7c4aa] text-xs sm:text-sm md:text-xl rotate-[-2deg] whitespace-nowrap z-20"
         >
           scroll to move through the practice
         </p>

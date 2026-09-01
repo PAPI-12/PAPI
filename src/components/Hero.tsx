@@ -17,6 +17,15 @@ const RING_TEXT = RING_LABEL + RING_LABEL;
 /** Eraser stroke key reserved for the cursor ring; bodies use their own keys. */
 const RING_STROKE = -1;
 
+/**
+ * Module-level, so it survives client-side route changes but NOT a reload.
+ * The dark overlay is a first-impression device: once the visitor has been
+ * through the hero and navigated away, coming back to Home shows the clean
+ * full-colour image with just the letter physics. A real page reload resets
+ * this module and the overlay returns.
+ */
+let overlaySpent = false;
+
 const HeroLetters: React.FC<{ text: string }> = ({ text }) => (
   <>
     {Array.from(text).map((ch, i) =>
@@ -184,6 +193,13 @@ const Hero: React.FC = () => {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.globalCompositeOperation = 'source-over';
       ctx.clearRect(0, 0, boxW, boxH);
+
+      // Already seen this session: leave the canvas fully transparent so the
+      // hero image reads at its original quality, and never re-darken it.
+      if (overlaySpent) {
+        strokes.clear();
+        return;
+      }
 
       const src = overlayImgRef.current;
       if (src && src.complete && src.naturalWidth > 0) {
@@ -366,6 +382,8 @@ const Hero: React.FC = () => {
     raf = requestAnimationFrame(frame);
 
     return () => {
+      // Leaving the hero (route change or unmount) consumes the overlay.
+      overlaySpent = true;
       cancelAnimationFrame(raf);
       bodyTrailRef.current = null;
       window.clearTimeout(resizeTimer);
@@ -479,7 +497,11 @@ const Hero: React.FC = () => {
             <text
               fill="#d7ff4f"
               fontFamily="'JetBrains Mono', ui-monospace, SFMono-Regular, monospace"
-              fontWeight="700"
+              fontWeight="800"
+              paintOrder="stroke"
+              stroke="rgba(23,23,21,0.55)"
+              strokeWidth="2.5"
+              strokeLinejoin="round"
             >
               <textPath ref={ringTextRef} href={`#${ringPathId}`} startOffset="0%">
                 {RING_TEXT}
