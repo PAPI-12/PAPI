@@ -4,7 +4,18 @@ import { ScribbleX, ScribbleUnderline, FloatingCross, FloatingWave } from './Scr
 import SplitFlapText from './SplitFlapText';
 import { useHeroPhysics, type HeroCursor } from '../hooks/useHeroPhysics';
 
-const RING_LABEL = 'CULTURE LED CREATIVE';
+const RING_WORD = 'CULTURE LED CREATIVE';
+/**
+ * The label is laid twice around the path and startOffset sweeps 0% -> 50%
+ * before wrapping. Because the second copy starts exactly where the first
+ * ends, the wrap point is visually identical: the ring loops forever without
+ * ever appearing to jump back to the start.
+ */
+const RING_LABEL = `${RING_WORD} \u00B7 `;
+const RING_TEXT = RING_LABEL + RING_LABEL;
+
+/** Eraser stroke key reserved for the cursor ring; bodies use their own keys. */
+const RING_STROKE = -1;
 
 const HeroLetters: React.FC<{ text: string }> = ({ text }) => (
   <>
@@ -37,6 +48,12 @@ const Hero: React.FC = () => {
    */
   const cursorRef = useRef<HeroCursor>({ x: 0, y: 0, r: 28, active: false });
 
+  /**
+   * Set by the eraser effect, read by the physics solver. Going through a ref
+   * means the solver is never restarted just because this callback changes.
+   */
+  const bodyTrailRef = useRef<((key: number, x: number, y: number, r: number) => void) | null>(null);
+
   // Unique so the textPath reference can never collide with another instance.
   const ringPathId = `hero-ring-${useId().replace(/:/g, '')}`;
 
@@ -52,7 +69,7 @@ const Hero: React.FC = () => {
 
   // Physics starts only once the headline has finished settling, so the intro
   // is never fighting the solver for the same glyphs.
-  useHeroPhysics(heroRef, introComplete && interactive, { cursorRef });
+  useHeroPhysics(heroRef, introComplete && interactive, { cursorRef, onBodyTrail: bodyTrailRef });
 
   // Safety net: if the split-flap never reports completion (backgrounded tab,
   // throttled timers) hand control over anyway.
@@ -84,11 +101,13 @@ const Hero: React.FC = () => {
     let primed = false;
     let pointerSeen = false;
 
-    // Eraser stroke bookkeeping.
+    /**
+     * Eraser strokes, one per emitter: the ring uses RING_STROKE, each physics
+     * body uses its own key. Tracking them separately means a letter's trail is
+     * never joined to the ring's trail by a stray line across the hero.
+     */
     let ctx: CanvasRenderingContext2D | null = null;
-    let lastEraseX = 0;
-    let lastEraseY = 0;
-    let hasErased = false;
+    const strokes = new Map<number, { x: number; y: number }>();
 
     let raf = 0;
     let lastT = 0;
@@ -140,7 +159,7 @@ const Hero: React.FC = () => {
         if (text) {
           // Fit the label exactly once around the circumference.
           const circumference = 2 * Math.PI * pr;
-          const px = Math.max(6, Math.min(15, (circumference / RING_LABEL.length) * 0.92));
+          const px = Math.max(6, Math.min(15, (circumference / RING_TEXT.length) * 1.72));
           text.setAttribute('font-size', String(px));
           text.setAttribute('letter-spacing', String(px * 0.08));
         }
@@ -190,41 +209,49 @@ const Hero: React.FC = () => {
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, boxW, boxH);
 
-      hasErased = false;
+      strokes.clear();
     };
 
     /**
-     * Erase a capsule from lastErase -> (x,y). Drawing the connecting segment
-     * (not just a dot) is what makes a fast sweep erase a continuous clean
-     * trail instead of a dotted line you have to go over twice.
+     * Carve a capsule from the emitter's previous point to (x, y). Drawing the
+     * connecting segment (not just a dot) is what makes a fast sweep leave one
+     * continuous clean trail instead of a dotted line.
      */
-    const erase = (x: number, y: number) => {
+    const erase = (key: number, x: number, y: number, r: number) => {
       if (!ctx) return;
+      const prev = strokes.get(key);
+      // Nothing meaningful moved: skip the composite op entirely.
+      if (prev && Math.hypot(x - prev.x, y - prev.y) < 0.6) return;
+
       ctx.globalCompositeOperation = 'destination-out';
       ctx.filter = 'blur(1px)';
       ctx.fillStyle = '#000';
       ctx.strokeStyle = '#000';
 
-      if (hasErased) {
-        ctx.lineWidth = radius * 2;
+      if (prev) {
+        ctx.lineWidth = r * 2;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.beginPath();
-        ctx.moveTo(lastEraseX, lastEraseY);
+        ctx.moveTo(prev.x, prev.y);
         ctx.lineTo(x, y);
         ctx.stroke();
       }
 
       ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.filter = 'none';
       ctx.globalCompositeOperation = 'source-over';
-      lastEraseX = x;
-      lastEraseY = y;
-      hasErased = true;
+
+      if (prev) { prev.x = x; prev.y = y; }
+      else strokes.set(key, { x, y });
     };
+
+    // Handed to the physics solver so every displaced letter carves its own
+    // path through the overlay, exactly like the ring does.
+    bodyTrailRef.current = erase;
 
     const centre = () => {
       tx = boxW / 2;
@@ -282,9 +309,10 @@ const Hero: React.FC = () => {
       // to an edge, and stop erasing.
       if (x < 0 || y < 0 || x > boxW || y > boxH) {
         pointerSeen = false;
-        // Break the stroke. Without this, re-entering the hero elsewhere would
-        // erase a straight line from the old exit point to the new entry point.
-        hasErased = false;
+        // Break only the ring's stroke; re-entering elsewhere must not erase a
+        // straight line from the old exit point. Letter trails are keyed
+        // separately and are unaffected.
+        strokes.delete(RING_STROKE);
         centre();
         return;
       }
@@ -328,20 +356,18 @@ const Hero: React.FC = () => {
       ring.style.opacity = primed ? '1' : '0';
 
       if (pointerSeen) {
-        // Only stamp when the ring actually moved; a resting cursor has
-        // already erased its own footprint.
-        if (!hasErased || Math.hypot(cx - lastEraseX, cy - lastEraseY) > 0.6) {
-          erase(cx, cy);
-        }
+        erase(RING_STROKE, cx, cy, radius);
         // Gentle continuous rotation of the label.
-        spin = (spin + dt * 9) % 100;
-        ringTextRef.current?.setAttribute('startOffset', `${spin}%`);
+        // Wrap at 50% — one full label width — so the loop never restarts.
+        spin = (spin + dt * 4.5) % 50;
+        ringTextRef.current?.setAttribute('startOffset', `${spin.toFixed(3)}%`);
       }
     };
     raf = requestAnimationFrame(frame);
 
     return () => {
       cancelAnimationFrame(raf);
+      bodyTrailRef.current = null;
       window.clearTimeout(resizeTimer);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('scroll', onScroll);
@@ -456,7 +482,7 @@ const Hero: React.FC = () => {
               fontWeight="700"
             >
               <textPath ref={ringTextRef} href={`#${ringPathId}`} startOffset="0%">
-                {RING_LABEL}
+                {RING_TEXT}
               </textPath>
             </text>
           </svg>

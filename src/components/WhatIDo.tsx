@@ -15,8 +15,6 @@ const LAST = N - 1;
 const MATRIX_GLYPHS =
   'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン0123456789<>*+-=/\\|#$%&@';
 
-const CONTINUE_LINE = 'CONTINUE INTO SELECTED WORK';
-const FOLLOW_LINE = 'FOLLOW THE CODE';
 
 const clamp01 = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t);
 const smoothstep = (t: number) => {
@@ -28,19 +26,49 @@ const smoothstep = (t: number) => {
 const glyphFor = (seed: number) => MATRIX_GLYPHS[Math.abs(seed) % MATRIX_GLYPHS.length];
 
 /* ── Timeline (fractions of the pinned scroll) ─────────────────────────────
-   0.00 → 0.60  skills rise from the back of the stack, one at a time
-   0.60 → 0.66  hold on AI CREATIVE
-   0.66 → 0.78  AI CREATIVE encodes into Matrix glyphs, rain builds
-   0.78 → 0.88  the encoded title dissolves away, rain at full strength
-   0.86 → 1.00  the two guidance lines type on
-   The section is only released once the lines are on screen, because the pin
-   simply runs out of travel at that point. No scroll hijacking is involved,
-   so there is nothing that can jam or freeze.                              */
-const T_SKILLS_END = 0.60;
-const T_HOLD_END = 0.66;
-const T_CODE_END = 0.78;
-const T_VANISH_END = 0.88;
-const T_TYPE_START = 0.86;
+   0.00 → 0.56  the five skills, each with a dwell so it is genuinely read
+   0.56 → 0.62  hold on AI CREATIVE
+   0.62 → 0.72  AI CREATIVE encodes into Matrix glyphs, rain builds
+   0.72 → 0.80  the title browns out and dies, rain at full strength
+   0.80 → 0.87  INITIALIZING terminal boots
+   0.87 → 1.00  the machine speaks, three lines
+   The section releases when the pin runs out of travel, so the visitor only
+   moves on once the machine has finished. Nothing hijacks the scroll, so
+   there is nothing that can jam or freeze.                                 */
+const T_SKILLS_END = 0.56;
+const T_HOLD_END = 0.62;
+const T_CODE_END = 0.72;
+const T_VANISH_END = 0.80;
+const T_INIT_START = 0.80;
+const T_INIT_END = 0.86;
+/** After this the dialogue fades, leaving only the code to lead the way out. */
+const T_RELEASE = 0.96;
+
+/** Share of each skill's slot spent held at the front before advancing. */
+const DWELL = 0.58;
+
+/** Machine dialogue, revealed one line at a time. */
+const ROBOT_LINES = [
+  'OH, HELLO',
+  'YOU CAN NOW CONTINUE TO FEATURED WORK',
+  'FOLLOW THE MATRIX CODE',
+];
+
+/**
+ * Front-of-stack position for a given scroll progress. Rather than sliding
+ * linearly (which meant the middle skills flashed past unread) each skill owns
+ * an equal slot and sits still for the first DWELL of it, then hands over.
+ */
+const frontAt = (p: number) => {
+  const u = clamp01(p / T_SKILLS_END) * N;
+  const i = Math.min(LAST, Math.floor(u));
+  const f = u - i;
+  const advance = f <= DWELL ? 0 : (f - DWELL) / (1 - DWELL);
+  return Math.min(LAST, i + advance);
+};
+
+/** Reveal `text` progressively; returns the visible substring. */
+const typed = (text: string, t: number) => text.slice(0, Math.round(text.length * clamp01(t)));
 
 const WhatIDo: React.FC = () => {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -53,8 +81,10 @@ const WhatIDo: React.FC = () => {
   const counterRef = useRef<HTMLSpanElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const cueRef = useRef<HTMLParagraphElement>(null);
-  const continueRef = useRef<HTMLParagraphElement>(null);
-  const followRef = useRef<HTMLParagraphElement>(null);
+  const termRef = useRef<HTMLDivElement>(null);
+  const initRef = useRef<HTMLParagraphElement>(null);
+  const barRef = useRef<HTMLSpanElement>(null);
+  const lineRefs = useRef<Array<HTMLParagraphElement | null>>([]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -75,15 +105,24 @@ const WhatIDo: React.FC = () => {
     /* ── Stack painting ─────────────────────────────────────────────── */
 
     const paint = (p: number) => {
-      // Which card is at the front, as a float.
-      const front = clamp01(p / T_SKILLS_END) * LAST;
+      // Front of the stack, with a dwell on each skill so all five are read.
+      const front = frontAt(p);
 
       const codeT =
         p <= T_HOLD_END ? 0 : smoothstep((p - T_HOLD_END) / (T_CODE_END - T_HOLD_END));
       const vanishT =
         p <= T_CODE_END ? 0 : smoothstep((p - T_CODE_END) / (T_VANISH_END - T_CODE_END));
-      const typeT =
-        p <= T_TYPE_START ? 0 : smoothstep((p - T_TYPE_START) / (1 - T_TYPE_START));
+      // Raw (un-eased) vanish, used for the power-down so the die-out reads as
+      // a failing supply rather than a smooth fade.
+      const vanishRaw = clamp01((p - T_CODE_END) / (T_VANISH_END - T_CODE_END));
+      const initT =
+        p <= T_INIT_START ? 0 : clamp01((p - T_INIT_START) / (T_INIT_END - T_INIT_START));
+      const speakT =
+        p <= T_INIT_END ? 0 : clamp01((p - T_INIT_END) / (T_RELEASE - T_INIT_END));
+      // Terminal dissolves on the way out so the last thing on screen is the
+      // code itself, which then scrolls away with the stage into Featured Work.
+      const releaseT =
+        p <= T_RELEASE ? 0 : smoothstep((p - T_RELEASE) / (1 - T_RELEASE));
 
       rainAlpha = Math.max(codeT * 0.85, vanishT);
 
@@ -122,8 +161,14 @@ const WhatIDo: React.FC = () => {
         if (isLast) {
           scale = Math.min(scale, 1);
           opacity = depth >= 0 ? Math.max(0, 1 - depth * 0.52) : 1;
-          opacity *= 1 - vanishT;
-          scale *= 1 - vanishT * 0.08;
+          // Power-down: the supply gutters a few times before it dies, and the
+          // glyphs swell slightly as the last of the charge dumps out.
+          if (vanishRaw > 0) {
+            const gutter = Math.sin(vanishRaw * 34) * 0.5 + 0.5;
+            const brownout = (1 - vanishRaw) * (0.55 + gutter * 0.45);
+            opacity *= Math.max(0, brownout);
+            scale *= 1 + vanishRaw * 0.18;
+          }
         }
 
         // Cards far off the stack are removed from the compositor entirely.
@@ -202,19 +247,52 @@ const WhatIDo: React.FC = () => {
         cueRef.current.style.visibility = o > 0.01 ? 'visible' : 'hidden';
       }
 
-      // Guidance lines type on, character by character.
-      if (continueRef.current) {
-        const shown = Math.round(CONTINUE_LINE.length * clamp01(typeT * 1.5));
-        const txt = CONTINUE_LINE.slice(0, shown);
-        if (continueRef.current.textContent !== txt) continueRef.current.textContent = txt;
-        continueRef.current.style.opacity = typeT > 0 ? '1' : '0';
+      /* ── Terminal boot, then the machine speaks ─────────────────── */
+
+      const term = termRef.current;
+      if (term) {
+        const live = initT > 0 || speakT > 0;
+        term.style.visibility = live ? 'visible' : 'hidden';
+        term.style.opacity = live ? (1 - releaseT).toFixed(3) : '0';
       }
-      if (followRef.current) {
-        const t2 = clamp01((typeT - 0.45) / 0.55);
-        const shown = Math.round(FOLLOW_LINE.length * t2);
-        const txt = FOLLOW_LINE.slice(0, shown);
-        if (followRef.current.textContent !== txt) followRef.current.textContent = txt;
-        followRef.current.style.opacity = t2 > 0 ? '1' : '0';
+
+      if (initRef.current) {
+        if (initT > 0 && speakT <= 0) {
+          // Dots accrue as it boots, then the whole line reports OK.
+          const dots = Math.min(5, Math.floor(initT * 7));
+          initRef.current.textContent = `INITIALIZING${'.'.repeat(dots)}`;
+          initRef.current.style.opacity = '1';
+        } else if (speakT > 0) {
+          initRef.current.textContent = 'INITIALIZING..... OK';
+          initRef.current.style.opacity = '0.45';
+        } else {
+          initRef.current.style.opacity = '0';
+        }
+      }
+
+      if (barRef.current) {
+        barRef.current.style.transform = `scaleX(${(speakT > 0 ? 1 : initT).toFixed(3)})`;
+        barRef.current.style.opacity = initT > 0 ? '1' : '0';
+      }
+
+      // Three lines, each typed within its own third of the speaking phase.
+      for (let i = 0; i < ROBOT_LINES.length; i++) {
+        const el = lineRefs.current[i];
+        if (!el) continue;
+        const slot = 1 / ROBOT_LINES.length;
+        const t = clamp01((speakT - i * slot) / (slot * 0.75));
+        if (t <= 0) {
+          el.style.visibility = 'hidden';
+          continue;
+        }
+        el.style.visibility = 'visible';
+        const txt = typed(ROBOT_LINES[i], t);
+        if (el.dataset.txt !== txt) {
+          el.dataset.txt = txt;
+          el.textContent = txt;
+        }
+        // Caret only on the line currently being written.
+        el.dataset.caret = t < 1 ? 'true' : 'false';
       }
     };
 
@@ -330,14 +408,29 @@ const WhatIDo: React.FC = () => {
       // No pinned choreography and no tall spacer: present the skills as a
       // simple readable list instead.
       root.style.height = 'auto';
+      const stageEl = stageRef.current;
+      if (stageEl) {
+        stageEl.style.position = 'static';
+        stageEl.style.height = 'auto';
+        stageEl.style.overflow = 'visible';
+        stageEl.style.paddingTop = '6rem';
+        stageEl.style.paddingBottom = '4rem';
+      }
+      // Both the stack wrapper and its inner host are absolutely positioned
+      // for the pinned layout; return them to normal flow.
+      const listOuter = cards[0]?.parentElement?.parentElement;
+      if (listOuter) {
+        listOuter.style.position = 'static';
+        listOuter.style.padding = '0';
+      }
       const listHost = cards[0]?.parentElement;
       if (listHost) {
+        listHost.style.height = 'auto';
         listHost.style.display = 'flex';
         listHost.style.flexDirection = 'column';
         listHost.style.alignItems = 'center';
         listHost.style.justifyContent = 'center';
         listHost.style.gap = '0.35rem';
-        listHost.style.height = '100%';
       }
       cards.forEach((c) => {
         if (!c) return;
@@ -350,14 +443,22 @@ const WhatIDo: React.FC = () => {
       });
       notes.forEach((nEl) => { if (nEl) nEl.style.visibility = 'hidden'; });
       if (cueRef.current) cueRef.current.style.visibility = 'hidden';
-      if (continueRef.current) {
-        continueRef.current.textContent = CONTINUE_LINE;
-        continueRef.current.style.opacity = '1';
+      // Terminal moves into normal flow beneath the list; leaving it absolutely
+      // centred would stack it straight on top of the skills.
+      if (termRef.current) {
+        const t = termRef.current;
+        t.style.position = 'static';
+        t.style.visibility = 'visible';
+        t.style.opacity = '1';
+        t.style.paddingTop = '2.5rem';
       }
-      if (followRef.current) {
-        followRef.current.textContent = FOLLOW_LINE;
-        followRef.current.style.opacity = '1';
-      }
+      if (initRef.current) initRef.current.textContent = 'INITIALIZING..... OK';
+      ROBOT_LINES.forEach((line, i) => {
+        const el = lineRefs.current[i];
+        if (!el) return;
+        el.style.visibility = 'visible';
+        el.textContent = line;
+      });
       return;
     }
 
@@ -393,7 +494,7 @@ const WhatIDo: React.FC = () => {
 
   return (
     // Tall spacer drives the pin; the stage inside is what stays on screen.
-    <div ref={rootRef} className="relative z-10 h-[440svh] bg-[#171715]">
+    <div ref={rootRef} className="relative z-10 h-[560svh] bg-[#171715]">
       <div
         ref={stageRef}
         className="sticky top-0 h-[100svh] min-h-[520px] overflow-hidden bg-[#171715]"
@@ -438,7 +539,7 @@ const WhatIDo: React.FC = () => {
               >
                 <h3
                   ref={(el) => { titleRefs.current[i] = el; }}
-                  className="font-display text-center text-[8.2vw] sm:text-[7.4vw] md:text-[6.4vw] lg:text-[5.6vw] leading-[0.95] tracking-[-0.04em] whitespace-nowrap"
+                  className="font-display text-center text-[8.4vw] sm:text-[8vw] md:text-[7.6vw] lg:text-[6.8vw] leading-[0.95] tracking-[-0.04em] whitespace-nowrap"
                   style={{ color: skill.color }}
                 >
                   {Array.from(skill.title).map((ch, li) => (
@@ -451,7 +552,9 @@ const WhatIDo: React.FC = () => {
         </div>
 
         {/* Copy for the front-most skill. */}
-        <div className="pointer-events-none absolute bottom-[22%] md:bottom-[20%] left-0 right-0 z-20 h-10">
+        {/* Skill copy, parked directly beneath the stack rather than floating
+            near the bottom edge, so title and caption read as one unit. */}
+        <div className="pointer-events-none absolute left-0 right-0 top-1/2 z-20 mt-[7vw] md:mt-[5.6vw] lg:mt-[5vw] h-10">
           {SKILLS.map((skill, i) => (
             <p
               key={skill.note}
@@ -478,27 +581,57 @@ const WhatIDo: React.FC = () => {
           ))}
         </div>
 
+        {/* Scroll hint sits just under the caption so there is no dead black
+            band between the content and the bottom of the section. */}
         <p
           ref={cueRef}
-          className="hand-note absolute bottom-8 md:bottom-12 left-1/2 -translate-x-1/2 text-[#d7c4aa] text-xs sm:text-sm md:text-xl rotate-[-2deg] whitespace-nowrap z-20"
+          className="hand-note absolute left-1/2 top-1/2 mt-[13vw] md:mt-[10vw] lg:mt-[9vw] -translate-x-1/2 text-[#d7c4aa] text-xs sm:text-sm md:text-xl rotate-[-2deg] whitespace-nowrap z-20"
         >
           scroll to move through the practice
         </p>
 
-        {/* Guidance out of the section, centred where the stack used to be. */}
-        <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 md:gap-4 px-4">
-          <p
-            ref={continueRef}
-            className="font-display text-center text-[#d7ff4f] text-[4.4vw] sm:text-[3.4vw] md:text-[2.6vw] lg:text-[2.1vw] leading-none tracking-[0.02em] whitespace-nowrap"
-            style={{ opacity: 0 }}
-            aria-live="polite"
-          />
-          <p
-            ref={followRef}
-            className="font-mono text-center text-[#4ade80] text-[3.2vw] sm:text-[2vw] md:text-[1.15vw] lg:text-[0.95vw] tracking-[0.42em] whitespace-nowrap"
-            style={{ opacity: 0 }}
-          />
+        {/* Machine terminal. Occupies the exact centre the stack vacated. */}
+        <div
+          ref={termRef}
+          className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 md:gap-6 px-6"
+          style={{ visibility: 'hidden', opacity: 0, transition: 'opacity 200ms linear' }}
+          aria-live="polite"
+        >
+          <div className="flex w-full max-w-[min(34rem,82vw)] flex-col items-center gap-2">
+            <p
+              ref={initRef}
+              className="font-mono text-center text-[#4ade80] text-[2.6vw] sm:text-[1.5vw] md:text-[0.95vw] lg:text-[0.8vw] tracking-[0.34em] whitespace-nowrap"
+              style={{ opacity: 0 }}
+            />
+            {/* Boot progress. */}
+            <span className="block h-px w-full overflow-hidden bg-[#4ade80]/15" aria-hidden>
+              <span
+                ref={barRef}
+                className="block h-full w-full origin-left bg-[#4ade80]"
+                style={{ transform: 'scaleX(0)', opacity: 0 }}
+              />
+            </span>
+          </div>
+
+          <div className="flex flex-col items-center gap-3 md:gap-4">
+            {ROBOT_LINES.map((line, i) => (
+              <p
+                key={line}
+                ref={(el) => { lineRefs.current[i] = el; }}
+                data-caret="false"
+                className={`robot-line text-center whitespace-nowrap ${
+                  i === 0
+                    ? 'font-display text-[#f5f3ee] text-[7vw] sm:text-[5vw] md:text-[3.4vw] lg:text-[2.9vw] leading-none tracking-[-0.02em]'
+                    : i === 1
+                      ? 'font-display text-[#d7ff4f] text-[3.1vw] sm:text-[2.7vw] md:text-[2.1vw] lg:text-[1.75vw] leading-none tracking-[0.01em]'
+                      : 'font-mono text-[#4ade80] text-[2.4vw] sm:text-[1.7vw] md:text-[1.05vw] lg:text-[0.9vw] tracking-[0.4em]'
+                }`}
+                style={{ visibility: 'hidden' }}
+              />
+            ))}
+          </div>
         </div>
+
       </div>
     </div>
   );

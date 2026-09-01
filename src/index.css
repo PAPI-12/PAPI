@@ -117,6 +117,20 @@
   will-change: transform;
 }
 
+/* Machine dialogue caret. Only the line currently being written blinks. */
+.robot-line[data-caret='true']::after {
+  content: '_';
+  margin-left: 0.12em;
+  animation: robot-caret 0.9s steps(1) infinite;
+}
+@keyframes robot-caret {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .robot-line[data-caret='true']::after { animation: none; opacity: 0; }
+}
+
 /* Cursor ring carrying CULTURE LED CREATIVE. Its size and position are set
    from JS each frame; this only establishes the compositor layer. */
 .hero-ring {

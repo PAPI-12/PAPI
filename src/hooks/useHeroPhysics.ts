@@ -43,6 +43,10 @@ type Body = {
   radius: number;
   invMass: number;
   moved: boolean;
+  /** Stable identity for per-body eraser stroke tracking. */
+  key: number;
+  /** Radius of the trail this body carves into the overlay. */
+  trailR: number;
 };
 
 /** Per-second velocity retained. Near 1 = space-like drift. */
@@ -106,6 +110,12 @@ export type HeroPhysicsOptions = {
    * cannot drift apart.
    */
   cursorRef: { current: HeroCursor };
+  /**
+   * Called once per frame for every body displaced from home, so the hero can
+   * carve the overlay along the letter's path exactly like the ring does. Held
+   * in a ref so changing the callback never restarts the solver.
+   */
+  onBodyTrail?: { current: ((key: number, x: number, y: number, r: number) => void) | null };
 };
 
 export function useHeroPhysics(
@@ -113,7 +123,7 @@ export function useHeroPhysics(
   enabled: boolean,
   options: HeroPhysicsOptions,
 ) {
-  const { cursorRef } = options;
+  const { cursorRef, onBodyTrail } = options;
 
   useEffect(() => {
     const hero = heroRef.current;
@@ -187,6 +197,9 @@ export function useHeroPhysics(
           radius: Math.max(collideHw, collideHh),
           invMass: kind === 'deco' ? 1.6 : 1,
           moved: false,
+          key: next.length,
+          // Letters carve roughly their own ink width; scribbles a little less.
+          trailR: Math.max(kind === 'letter' ? collideHw * 0.95 : collideHw * 0.7, 10),
         });
 
         el.style.willChange = 'transform';
@@ -350,11 +363,18 @@ export function useHeroPhysics(
     };
 
     const render = () => {
+      const trail = onBodyTrail?.current ?? null;
       for (let i = 0; i < bodies.length; i++) {
         const b = bodies[i];
         if (!b.moved) continue;
         b.el.style.transform =
           `translate3d(${b.x.toFixed(2)}px, ${b.y.toFixed(2)}px, 0) rotate(${(b.homeRot + b.rot).toFixed(2)}deg)`;
+
+        // Only bodies actually displaced from home carve the overlay, so the
+        // headline never pre-erases its own footprint on load.
+        if (trail && (b.x * b.x + b.y * b.y) > 4) {
+          trail(b.key, b.homeX + b.x, b.homeY + b.y, b.trailR);
+        }
       }
     };
 
@@ -403,5 +423,5 @@ export function useHeroPhysics(
         b.el.style.willChange = '';
       });
     };
-  }, [heroRef, enabled, cursorRef]);
+  }, [heroRef, enabled, cursorRef, onBodyTrail]);
 }
