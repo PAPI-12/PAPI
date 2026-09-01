@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation, Link } from 'react-router-dom';
 import { MouseProvider } from './context/MouseContext';
+import { useSmoothScroll } from './hooks/useSmoothScroll';
 import Navbar from './components/Navbar';
 import CustomCursor from './components/CustomCursor';
 import Home from './pages/Home';
@@ -69,6 +70,7 @@ const ScrollProgress: React.FC = () => {
 };
 
 const AppContent: React.FC = () => {
+  useSmoothScroll();
   return (
     <div className="relative min-h-screen bg-[#171715] mix-grain">
       <ScrollProgress />

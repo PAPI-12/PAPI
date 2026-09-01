@@ -56,6 +56,11 @@ const SplitFlapText: React.FC<Props> = ({
   inView = true,
   onComplete,
 }) => {
+  // The hero measures this glyph to size the cursor ring. Tagging the first
+  // occurrence keeps the lookup unambiguous.
+  const gaugeChar = 'O';
+  const gaugeIndex = target.indexOf(gaugeChar);
+
   const rootRef = useRef<HTMLSpanElement>(null);
   const tileRefs = useRef<Array<HTMLSpanElement | null>>([]);
   const faceRefs = useRef<Array<HTMLSpanElement | null>>([]);
@@ -191,6 +196,7 @@ const SplitFlapText: React.FC<Props> = ({
           ref={(el) => { tileRefs.current[i] = el; }}
           data-flipping="false"
           data-hero-physics={t === ' ' ? undefined : 'letter'}
+          data-ring-gauge={t === gaugeChar && i === gaugeIndex ? t : undefined}
           className="splitflap-tile splitflap-hero relative inline-block align-baseline"
           style={{ width: `${widthOf(t)}em` }}
         >

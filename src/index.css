@@ -117,6 +117,19 @@
   will-change: transform;
 }
 
+/* Cursor ring carrying CULTURE LED CREATIVE. Its size and position are set
+   from JS each frame; this only establishes the compositor layer. */
+.hero-ring {
+  will-change: transform, opacity;
+  transition: opacity 260ms ease;
+}
+.hero-ring svg {
+  overflow: visible;
+}
+.hero-ring text {
+  text-transform: uppercase;
+}
+
 .will-change-transform {
   will-change: transform;
   transform: translateZ(0);

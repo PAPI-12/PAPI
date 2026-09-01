@@ -39,17 +39,33 @@ const Navbar: React.FC = () => {
   const goToHero = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsMobileMenuOpen(false);
+
     const scrollHero = () => {
       const hero = document.getElementById('hero');
       if (hero) hero.scrollIntoView({ behavior: 'smooth', block: 'start' });
       else window.scrollTo({ top: 0, behavior: 'smooth' });
     };
+
     if (location.pathname === '/') {
       scrollHero();
       return;
     }
+
+    // Coming from another route the hero does not exist yet. A fixed timeout
+    // was a guess and missed whenever the lazy chunk resolved slowly, which is
+    // why the wordmark sometimes did nothing. Poll for the element instead and
+    // give up cleanly after a bounded window.
     navigate('/');
-    window.setTimeout(scrollHero, 60);
+    let tries = 0;
+    const findHero = () => {
+      if (document.getElementById('hero')) {
+        scrollHero();
+        return;
+      }
+      if (tries++ < 40) requestAnimationFrame(findHero);
+      else window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    requestAnimationFrame(findHero);
   };
 
   const navLinks = [
