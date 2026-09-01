@@ -1,10 +1,10 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
 
 const SKILLS = [
   { title: 'UX/UI DESIGN', note: 'interfaces with instinct', color: '#f5f3ee' },
   { title: 'ART DIRECTION', note: 'visual systems with attitude', color: '#d7ff4f' },
   { title: 'CINEMATOGRAPHY', note: 'motion shaped by feeling', color: '#d7c4aa' },
-  { title: 'GRAPHIC DESIGNER', note: 'culture-led systems & print', color: '#d7ff4f' },
+  { title: 'GRAPHIC DESIGN', note: 'culture-led systems & print', color: '#d7ff4f' },
   { title: 'AI CREATIVE', note: 'future-facing image craft', color: '#f5f3ee' },
 ];
 
@@ -14,7 +14,6 @@ const LAST = N - 1;
 /** Glyph pool for the code effect. */
 const MATRIX_GLYPHS =
   'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン0123456789<>*+-=/\\|#$%&@';
-
 
 const clamp01 = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t);
 const smoothstep = (t: number) => {
@@ -26,26 +25,32 @@ const smoothstep = (t: number) => {
 const glyphFor = (seed: number) => MATRIX_GLYPHS[Math.abs(seed) % MATRIX_GLYPHS.length];
 
 /* ── Timeline (fractions of the pinned scroll) ─────────────────────────────
-   0.00 → 0.56  the five skills, each with a dwell so it is genuinely read
-   0.56 → 0.62  hold on AI CREATIVE
-   0.62 → 0.72  AI CREATIVE encodes into Matrix glyphs, rain builds
-   0.72 → 0.80  the title browns out and dies, rain at full strength
-   0.80 → 0.87  INITIALIZING terminal boots
-   0.87 → 1.00  the machine speaks, three lines
-   The section releases when the pin runs out of travel, so the visitor only
-   moves on once the machine has finished. Nothing hijacks the scroll, so
-   there is nothing that can jam or freeze.                                 */
-const T_SKILLS_END = 0.56;
-const T_HOLD_END = 0.62;
-const T_CODE_END = 0.72;
-const T_VANISH_END = 0.80;
-const T_INIT_START = 0.80;
-const T_INIT_END = 0.86;
-/** After this the dialogue fades, leaving only the code to lead the way out. */
-const T_RELEASE = 0.96;
+   0.00 → 0.60   the five skills, each with a dwell so it is genuinely read
+                 (the scroll cue melts away during the last skill's dwell —
+                 once the practice has been walked through, it has no job)
+   0.60 → 0.66   hold on AI CREATIVE, rain begins to gather
+   0.66 → 0.76   AI CREATIVE encodes into Matrix glyphs, left to right
+   0.76 → 0.84   brownout: the power gutters and the title dies mid-air
+   0.84 → 0.90   INITIALIZING decrypts out of nowhere, centre stage
+   0.90 → 0.965  the machine speaks, three lines
+   0.965 → 0.985 the dialogue dissolves
+   0.96 → 1.00   the code surges and a scanline points the way down; the pin
+                 then runs out of road and the whole stage scrolls up and off,
+                 handing the visitor — and the code — over to Featured Work. */
+const T_SKILLS_END = 0.6;
+const T_CUE_FADE_START = 0.5;
+const T_HOLD_END = 0.66;
+const T_CODE_END = 0.76;
+const T_VANISH_END = 0.84;
+const T_INIT_END = 0.9;
+const T_SPEAK_END = 0.965;
+const T_SURGE_START = 0.96;
 
 /** Share of each skill's slot spent held at the front before advancing. */
-const DWELL = 0.58;
+const DWELL = 0.6;
+
+/** Total scroll length of the pinned sequence, in screen heights. */
+const SCREENS = 6.2;
 
 /** Machine dialogue, revealed one line at a time. */
 const ROBOT_LINES = [
@@ -53,6 +58,8 @@ const ROBOT_LINES = [
   'YOU CAN NOW CONTINUE TO FEATURED WORK',
   'FOLLOW THE MATRIX CODE',
 ];
+
+const INIT_WORD = 'INITIALIZING';
 
 /**
  * Front-of-stack position for a given scroll progress. Rather than sliding
@@ -85,8 +92,11 @@ const WhatIDo: React.FC = () => {
   const initRef = useRef<HTMLParagraphElement>(null);
   const barRef = useRef<HTMLSpanElement>(null);
   const lineRefs = useRef<Array<HTMLParagraphElement | null>>([]);
+  const guideRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  // Layout effect, not a passive one: the spacer / stage heights are written
+  // before paint so the pin never gets a frame at its fallback size.
+  useLayoutEffect(() => {
     const root = rootRef.current;
     const stage = stageRef.current;
     if (!root || !stage) return;
@@ -99,8 +109,21 @@ const WhatIDo: React.FC = () => {
 
     /** 0 = no rain, 1 = full rain. Read by the canvas loop. */
     let rainAlpha = 0;
-    let activeIdx = -1;
-    let lastCounter = -1;
+    /** 0 = normal fall, 1 = Reloaded surge on the way out. */
+    let rainBoost = 0;
+
+    /**
+     * The pin's height is measured and written in pixels. Pure-CSS svh
+     * heights are the classic failure here: any environment that mishandles
+     * the unit collapses the spacer to its fallback, travel hits zero, and
+     * the section scrolls straight past having shown only the first skill.
+     * Pixels cannot be misread.
+     */
+    const measure = () => {
+      const vh = window.innerHeight;
+      root.style.height = `${Math.round(vh * SCREENS)}px`;
+      stage.style.height = `${Math.max(vh, 480)}px`;
+    };
 
     /* ── Stack painting ─────────────────────────────────────────────── */
 
@@ -116,22 +139,23 @@ const WhatIDo: React.FC = () => {
       // a failing supply rather than a smooth fade.
       const vanishRaw = clamp01((p - T_CODE_END) / (T_VANISH_END - T_CODE_END));
       const initT =
-        p <= T_INIT_START ? 0 : clamp01((p - T_INIT_START) / (T_INIT_END - T_INIT_START));
+        p <= T_VANISH_END ? 0 : clamp01((p - T_VANISH_END) / (T_INIT_END - T_VANISH_END));
       const speakT =
-        p <= T_INIT_END ? 0 : clamp01((p - T_INIT_END) / (T_RELEASE - T_INIT_END));
-      // Terminal dissolves on the way out so the last thing on screen is the
-      // code itself, which then scrolls away with the stage into Featured Work.
+        p <= T_INIT_END ? 0 : clamp01((p - T_INIT_END) / (T_SPEAK_END - T_INIT_END));
       const releaseT =
-        p <= T_RELEASE ? 0 : smoothstep((p - T_RELEASE) / (1 - T_RELEASE));
+        p <= T_SPEAK_END ? 0 : smoothstep((p - T_SPEAK_END) / (0.985 - T_SPEAK_END));
+      // Final hand-off: the dialogue is gone, the code takes over at full
+      // force and the stage itself carries it up and into Featured Work.
+      const surgeT = smoothstep((p - T_SURGE_START) / (1 - T_SURGE_START));
 
-      rainAlpha = Math.max(codeT * 0.85, vanishT);
+      rainAlpha = Math.max(codeT * 0.85, vanishT, initT * 0.9);
+      rainBoost = surgeT;
 
       const idx = Math.min(LAST, Math.round(front));
-      if (idx !== lastCounter) {
-        lastCounter = idx;
-        if (counterRef.current) counterRef.current.textContent = `0${idx + 1}`;
+      if (counterRef.current && counterRef.current.dataset.n !== String(idx)) {
+        counterRef.current.dataset.n = String(idx);
+        counterRef.current.textContent = `0${idx + 1}`;
       }
-      activeIdx = idx;
 
       for (let i = 0; i < N; i++) {
         const card = cards[i];
@@ -158,18 +182,16 @@ const WhatIDo: React.FC = () => {
         }
 
         // The final card does not fly past — it stays front and centre to be
-        // encoded, then dissolves.
+        // encoded, then dies where it stands.
         if (isLast) {
           scale = Math.min(scale, 1);
           opacity = depth >= 0 ? Math.max(0, 1 - depth * 0.52) : 1;
           // Power-down: the supply gutters a few times before it dies, and the
-          // glyphs swell slightly as the last of the charge dumps out.
+          // glyphs swell as the last of the charge dumps out.
           if (vanishRaw > 0) {
             const gutter = Math.sin(vanishRaw * 34) * 0.5 + 0.5;
             const brownout = (1 - vanishRaw) * (0.55 + gutter * 0.45);
             opacity *= Math.max(0, brownout);
-            // Swells to fill the section as the charge dumps out, so it dies
-            // large rather than shrinking away.
             scale *= 1 + vanishRaw * 0.42;
           }
         }
@@ -234,7 +256,7 @@ const WhatIDo: React.FC = () => {
       for (let i = 0; i < N; i++) {
         const dot = dots[i];
         if (!dot) continue;
-        const on = i === activeIdx;
+        const on = i === idx;
         dot.style.transform = `scaleY(${on ? 1 : 0.25})`;
         dot.style.backgroundColor = on ? '#d7ff4f' : 'rgba(245,243,238,0.25)';
         dot.style.opacity = String(1 - vanishT);
@@ -244,8 +266,13 @@ const WhatIDo: React.FC = () => {
         headerRef.current.style.opacity = (1 - smoothstep(vanishT * 1.2)).toFixed(3);
       }
 
+      // The cue retires as the last skill completes its dwell — the end of the
+      // sequence guides the visitor from here on, so the hint has no more
+      // work to do and takes no more space.
       if (cueRef.current) {
-        const o = 1 - smoothstep(Math.max(codeT, vanishT) * 1.3);
+        const o = 1 - smoothstep(
+          (p - T_CUE_FADE_START) / (T_SKILLS_END - 0.02 - T_CUE_FADE_START),
+        );
         cueRef.current.style.opacity = o.toFixed(3);
         cueRef.current.style.visibility = o > 0.01 ? 'visible' : 'hidden';
       }
@@ -261,21 +288,39 @@ const WhatIDo: React.FC = () => {
 
       if (initRef.current) {
         if (initT > 0 && speakT <= 0) {
-          // Dots accrue as it boots, then the whole line reports OK.
-          const dots = Math.min(5, Math.floor(initT * 7));
-          initRef.current.textContent = `INITIALIZING${'.'.repeat(dots)}`;
+          // The word decrypts out of nowhere, left to right, letters settling
+          // out of glyph noise; then the dots accrue while the bar fills.
+          const decodeT = clamp01(initT / 0.55);
+          let text = '';
+          const tick = Math.floor(initT * 30);
+          for (let li = 0; li < INIT_WORD.length; li++) {
+            if (decodeT >= (li + 1) / INIT_WORD.length) text += INIT_WORD[li];
+            else if (decodeT > li / INIT_WORD.length - 0.28) text += glyphFor(tick * 13 + li * 31);
+          }
+          if (decodeT >= 1) {
+            const dots = Math.min(5, Math.floor((initT - 0.55) / 0.45 * 6));
+            text += '.'.repeat(dots);
+          }
+          if (initRef.current.dataset.txt !== text) {
+            initRef.current.dataset.txt = text;
+            initRef.current.textContent = text;
+          }
           initRef.current.style.opacity = '1';
         } else if (speakT > 0) {
-          initRef.current.textContent = 'INITIALIZING..... OK';
+          if (initRef.current.dataset.txt !== 'BOOT_OK') {
+            initRef.current.dataset.txt = 'BOOT_OK';
+            initRef.current.textContent = `${INIT_WORD}..... OK`;
+          }
           initRef.current.style.opacity = '0.45';
         } else {
           initRef.current.style.opacity = '0';
+          initRef.current.dataset.txt = '';
         }
       }
 
       if (barRef.current) {
         barRef.current.style.transform = `scaleX(${(speakT > 0 ? 1 : initT).toFixed(3)})`;
-        barRef.current.style.opacity = initT > 0 ? '1' : '0';
+        barRef.current.style.opacity = initT > 0 ? (speakT > 0 ? '0.35' : '1') : '0';
       }
 
       // Three lines, each typed within its own third of the speaking phase.
@@ -295,7 +340,15 @@ const WhatIDo: React.FC = () => {
           el.textContent = txt;
         }
         // Caret only on the line currently being written.
-        el.dataset.caret = t < 1 ? 'true' : 'false';
+        el.dataset.caret = t < 1 && releaseT < 1 ? 'true' : 'false';
+      }
+
+      // The way out: a scanline at the foot of the stage, pointing down. It
+      // rides the last stretch of the pin and leads the eye into the rain.
+      if (guideRef.current) {
+        const g = surgeT;
+        guideRef.current.style.opacity = g.toFixed(3);
+        guideRef.current.style.visibility = g > 0.01 ? 'visible' : 'hidden';
       }
     };
 
@@ -371,13 +424,15 @@ const WhatIDo: React.FC = () => {
       if (rctx) {
         if (rainAlpha > 0.01) {
           rainDrawn = true;
+          const speedMul = 1 + rainBoost * 1.6;
+          const alpha = Math.min(1, rainAlpha * (1 + rainBoost * 0.25));
           rctx.clearRect(0, 0, cw, ch);
           rctx.font = `${FONT_SIZE}px "JetBrains Mono", ui-monospace, monospace`;
           rctx.textBaseline = 'top';
 
           for (let i = 0; i < columns.length; i++) {
             const col = columns[i];
-            col.y += col.speed * dt;
+            col.y += col.speed * speedMul * dt;
             if (col.y - col.len * ROW > ch) {
               col.y = -Math.random() * ch * 0.5;
               col.speed = 90 + Math.random() * 190;
@@ -387,7 +442,7 @@ const WhatIDo: React.FC = () => {
               const y = col.y - k * ROW;
               if (y < -ROW || y > ch) continue;
               const fade = 1 - k / col.len;
-              rctx.globalAlpha = rainAlpha * fade * 0.85;
+              rctx.globalAlpha = alpha * fade * 0.85;
               rctx.fillStyle = k === 0 ? '#eafff0' : '#4ade80';
               rctx.fillText(glyphFor(col.seed + k + Math.floor(col.y / ROW)), col.x, y);
             }
@@ -404,6 +459,7 @@ const WhatIDo: React.FC = () => {
 
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+    measure();
     setupRain();
     paint(0);
 
@@ -411,14 +467,12 @@ const WhatIDo: React.FC = () => {
       // No pinned choreography and no tall spacer: present the skills as a
       // simple readable list instead.
       root.style.height = 'auto';
-      const stageEl = stageRef.current;
-      if (stageEl) {
-        stageEl.style.position = 'static';
-        stageEl.style.height = 'auto';
-        stageEl.style.overflow = 'visible';
-        stageEl.style.paddingTop = '6rem';
-        stageEl.style.paddingBottom = '4rem';
-      }
+      stage.style.position = 'static';
+      stage.style.height = 'auto';
+      stage.style.overflow = 'visible';
+      stage.style.paddingTop = '6rem';
+      stage.style.paddingBottom = '4rem';
+
       // Both the stack wrapper and its inner host are absolutely positioned
       // for the pinned layout; return them to normal flow.
       const listOuter = cards[0]?.parentElement?.parentElement;
@@ -446,8 +500,9 @@ const WhatIDo: React.FC = () => {
       });
       notes.forEach((nEl) => { if (nEl) nEl.style.visibility = 'hidden'; });
       if (cueRef.current) cueRef.current.style.visibility = 'hidden';
-      // Terminal moves into normal flow beneath the list; leaving it absolutely
-      // centred would stack it straight on top of the skills.
+      if (guideRef.current) guideRef.current.style.visibility = 'hidden';
+      // Terminal moves into normal flow beneath the list; leaving it
+      // absolutely centred would stack it straight on top of the skills.
       if (termRef.current) {
         const t = termRef.current;
         t.style.position = 'static';
@@ -455,7 +510,7 @@ const WhatIDo: React.FC = () => {
         t.style.opacity = '1';
         t.style.paddingTop = '2.5rem';
       }
-      if (initRef.current) initRef.current.textContent = 'INITIALIZING..... OK';
+      if (initRef.current) initRef.current.textContent = `${INIT_WORD}..... OK`;
       ROBOT_LINES.forEach((line, i) => {
         const el = lineRefs.current[i];
         if (!el) return;
@@ -468,7 +523,7 @@ const WhatIDo: React.FC = () => {
     const io = new IntersectionObserver(
       ([entry]) => {
         onScreen = !!entry?.isIntersecting;
-        if (onScreen) { lastT = 0; setupRain(); }
+        if (onScreen) { lastT = 0; measure(); setupRain(); lastProgress = -1; }
       },
       { rootMargin: '15% 0px' },
     );
@@ -478,6 +533,7 @@ const WhatIDo: React.FC = () => {
     const onResize = () => {
       window.clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(() => {
+        measure();
         setupRain();
         lastProgress = -1;
       }, 150);
@@ -497,14 +553,13 @@ const WhatIDo: React.FC = () => {
 
   return (
     // Tall spacer drives the pin; the stage inside is what stays on screen.
-    <div ref={rootRef} className="relative z-10 h-[560svh] bg-[#171715]">
+    // Heights are written in pixels by the layout effect — a pure-CSS unit
+    // collapsing is how this section used to lose its lock and flash past.
+    <div ref={rootRef} className="relative z-10 bg-[#171715]" style={{ height: '620vh' }}>
       <div
         ref={stageRef}
-        className="sticky top-0 h-[100svh] min-h-[520px] overflow-hidden bg-[#171715]"
-        style={{
-          boxShadow: '0 -40px 80px rgba(0,0,0,0.45)',
-          borderTop: '1px solid rgba(245,243,238,0.08)',
-        }}
+        className="sticky top-0 overflow-hidden bg-[#171715]"
+        style={{ height: '100vh', minHeight: '480px', boxShadow: '0 -40px 80px rgba(0,0,0,0.45)', borderTop: '1px solid rgba(245,243,238,0.08)' }}
       >
         <div
           aria-hidden
@@ -554,9 +609,9 @@ const WhatIDo: React.FC = () => {
           </div>
         </div>
 
-        {/* Copy for the front-most skill. */}
         {/* Skill copy, parked directly beneath the stack rather than floating
-            near the bottom edge, so title and caption read as one unit. */}
+            near the bottom edge, so title, caption and cue read as one unit
+            with no dead band under them. */}
         <div className="pointer-events-none absolute left-0 right-0 top-1/2 z-20 mt-[6.2vw] md:mt-[5.8vw] lg:mt-[5.4vw] h-10">
           {SKILLS.map((skill, i) => (
             <p
@@ -584,11 +639,11 @@ const WhatIDo: React.FC = () => {
           ))}
         </div>
 
-        {/* Scroll hint sits just under the caption so there is no dead black
-            band between the content and the bottom of the section. */}
+        {/* Scroll hint hugs the caption; it retires as the last skill
+            completes, because the machine takes over the guiding from there. */}
         <p
           ref={cueRef}
-          className="hand-note absolute left-1/2 top-1/2 mt-[10.5vw] md:mt-[9.4vw] lg:mt-[8.6vw] -translate-x-1/2 text-[#d7c4aa] text-xs sm:text-sm md:text-xl rotate-[-2deg] whitespace-nowrap z-20"
+          className="hand-note absolute left-1/2 top-1/2 mt-[10.2vw] md:mt-[9.2vw] lg:mt-[8.4vw] -translate-x-1/2 text-[#d7c4aa] text-xs sm:text-sm md:text-xl rotate-[-2deg] whitespace-nowrap z-20"
         >
           scroll to move through the practice
         </p>
@@ -597,14 +652,23 @@ const WhatIDo: React.FC = () => {
         <div
           ref={termRef}
           className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 md:gap-6 px-6"
-          style={{ visibility: 'hidden', opacity: 0, transition: 'opacity 200ms linear' }}
+          style={{ visibility: 'hidden', opacity: 0 }}
           aria-live="polite"
         >
+          {/* CRT scanlines, only ever visible with the terminal. */}
+          <div
+            aria-hidden
+            className="absolute inset-0"
+            style={{
+              background:
+                'repeating-linear-gradient(0deg, rgba(74,222,128,0.05) 0 1px, transparent 1px 4px)',
+            }}
+          />
           <div className="flex w-full max-w-[min(34rem,82vw)] flex-col items-center gap-2">
             <p
               ref={initRef}
               className="font-mono text-center text-[#4ade80] text-[2.6vw] sm:text-[1.5vw] md:text-[0.95vw] lg:text-[0.8vw] tracking-[0.34em] whitespace-nowrap"
-              style={{ opacity: 0 }}
+              style={{ opacity: 0, minHeight: '1.2em' }}
             />
             {/* Boot progress. */}
             <span className="block h-px w-full overflow-hidden bg-[#4ade80]/15" aria-hidden>
@@ -633,6 +697,22 @@ const WhatIDo: React.FC = () => {
               />
             ))}
           </div>
+        </div>
+
+        {/* The way out: a scanline at the foot of the stage that appears with
+            the surge and points down — follow the matrix code. It rides off
+            the top with the stage, handing over cleanly to Featured Work. */}
+        <div
+          ref={guideRef}
+          className="pointer-events-none absolute bottom-0 left-0 right-0 z-20 flex flex-col items-center gap-1 pb-2"
+          style={{ visibility: 'hidden', opacity: 0 }}
+          aria-hidden
+        >
+          <p className="font-mono text-[#4ade80] text-[10px] tracking-[0.5em] uppercase">
+            continue
+          </p>
+          <span className="matrix-guide-caret block text-[#4ade80] text-sm leading-none">▼</span>
+          <span className="block h-px w-full bg-gradient-to-r from-transparent via-[#4ade80]/70 to-transparent" />
         </div>
 
       </div>
