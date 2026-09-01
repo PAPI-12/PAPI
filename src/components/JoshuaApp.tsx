@@ -95,7 +95,7 @@ export default function App() {
           {/* Thumbnail / Video */}
           {!isPlaying ? (
             <>
-              <img
+              <img loading="lazy" decoding="async"
                 src="https://img.youtube.com/vi/VUCKP8Z2frQ/maxresdefault.jpg"
                 alt="Joshua The I AM - OTR thumbnail"
                 className="absolute inset-0 h-full w-full object-cover scale-[1.02] group-hover:scale-100 transition-transform duration-[1.8s] ease-[cubic-bezier(0.16,1,0.3,1)]"

@@ -1,9 +1,30 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { motion, useMotionValue, useSpring } from 'framer-motion';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ScribbleX, ScribbleUnderline, FloatingCross, FloatingWave } from './Scribbles';
 import SplitFlapText from './SplitFlapText';
-import { useHeroPhysics } from '../hooks/useHeroPhysics';
+import { useHeroPhysics, type HeroCursor } from '../hooks/useHeroPhysics';
+
+const RING_WORD = 'CULTURE LED CREATIVE';
+/**
+ * The label is laid twice around the path and startOffset sweeps 0% -> 50%
+ * before wrapping. Because the second copy starts exactly where the first
+ * ends, the wrap point is visually identical: the ring loops forever without
+ * ever appearing to jump back to the start.
+ */
+const RING_LABEL = `${RING_WORD} \u00B7 `;
+const RING_TEXT = RING_LABEL + RING_LABEL;
+
+/** Eraser stroke key reserved for the cursor ring; bodies use their own keys. */
+const RING_STROKE = -1;
+
+/**
+ * Module-level, so it survives client-side route changes but NOT a reload.
+ * The dark overlay is a first-impression device: once the visitor has been
+ * through the hero and navigated away, coming back to Home shows the clean
+ * full-colour image with just the letter physics. A real page reload resets
+ * this module and the overlay returns.
+ */
+let overlaySpent = false;
 
 const HeroLetters: React.FC<{ text: string }> = ({ text }) => (
   <>
@@ -21,123 +42,404 @@ const HeroLetters: React.FC<{ text: string }> = ({ text }) => (
 
 const Hero: React.FC = () => {
   const heroRef = useRef<HTMLDivElement>(null);
-  const cursorNoteRef = useRef<HTMLDivElement>(null);
-  const [isMeasured, setIsMeasured] = useState(false);
+  const ringRef = useRef<HTMLDivElement>(null);
+  const ringTextRef = useRef<SVGTextPathElement>(null);
+  const eraserRef = useRef<HTMLCanvasElement>(null);
+  const overlayImgRef = useRef<HTMLImageElement>(null);
+
   const [introComplete, setIntroComplete] = useState(false);
-  const [physicsEnabled, setPhysicsEnabled] = useState(false);
+  const [interactive, setInteractive] = useState(false);
 
-  const targetX = useMotionValue(0);
-  const targetY = useMotionValue(0);
-  const springX = useSpring(targetX, { stiffness: 260, damping: 28, mass: 0.6 });
-  const springY = useSpring(targetY, { stiffness: 260, damping: 28, mass: 0.6 });
+  /**
+   * Shared cursor state. The ring, the eraser stroke and the physics pusher
+   * all read this exact object, so the three can never disagree about where
+   * the cursor "is" — that de-sync was the source of the disconnect glitch.
+   */
+  const cursorRef = useRef<HeroCursor>({ x: 0, y: 0, r: 28, active: false });
 
-  const handleIntroComplete = useCallback(() => {
-    setIntroComplete(true);
-  }, []);
+  /**
+   * Set by the eraser effect, read by the physics solver. Going through a ref
+   * means the solver is never restarted just because this callback changes.
+   */
+  const bodyTrailRef = useRef<((key: number, x: number, y: number, r: number) => void) | null>(null);
+
+  // Unique so the textPath reference can never collide with another instance.
+  const ringPathId = `hero-ring-${useId().replace(/:/g, '')}`;
+
+  const handleIntroComplete = useCallback(() => setIntroComplete(true), []);
 
   useEffect(() => {
-    const fine = window.matchMedia('(pointer: fine)').matches && window.matchMedia('(hover: hover)').matches;
+    const fine =
+      window.matchMedia('(pointer: fine)').matches &&
+      window.matchMedia('(hover: hover)').matches;
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    setPhysicsEnabled(fine && !reduce);
+    setInteractive(fine && !reduce);
   }, []);
 
-  useHeroPhysics(heroRef, introComplete && physicsEnabled);
+  // Physics starts only once the headline has finished settling, so the intro
+  // is never fighting the solver for the same glyphs.
+  useHeroPhysics(heroRef, introComplete && interactive, { cursorRef, onBodyTrail: bodyTrailRef });
+
+  // Safety net: if the split-flap never reports completion (backgrounded tab,
+  // throttled timers) hand control over anyway.
+  useEffect(() => {
+    const t = window.setTimeout(() => setIntroComplete(true), 4200);
+    return () => window.clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     const hero = heroRef.current;
-    if (!hero) return;
+    const ring = ringRef.current;
+    const canvas = eraserRef.current;
+    if (!hero || !ring || !canvas) return;
 
-    let heroBounds = hero.getBoundingClientRect();
-    let noteWidth = cursorNoteRef.current?.offsetWidth || 180;
-    let noteHeight = cursorNoteRef.current?.offsetHeight || 32;
+    let boxLeft = 0;
+    let boxTop = 0;
+    let boxW = 0;
+    let boxH = 0;
+    let radius = 28;
+    let dpr = 1;
 
-    const updateBounds = () => {
-      if (!hero) return;
-      heroBounds = hero.getBoundingClientRect();
-      if (cursorNoteRef.current) {
-        noteWidth = cursorNoteRef.current.offsetWidth || 180;
-        noteHeight = cursorNoteRef.current.offsetHeight || 32;
+    // Ring spring state (hero-local centre).
+    let cx = 0;
+    let cy = 0;
+    let tx = 0;
+    let ty = 0;
+    let vx = 0;
+    let vy = 0;
+    let primed = false;
+    let pointerSeen = false;
+
+    /**
+     * Eraser strokes, one per emitter: the ring uses RING_STROKE, each physics
+     * body uses its own key. Tracking them separately means a letter's trail is
+     * never joined to the ring's trail by a stray line across the hero.
+     */
+    let ctx: CanvasRenderingContext2D | null = null;
+    const strokes = new Map<number, { x: number; y: number }>();
+
+    let raf = 0;
+    let lastT = 0;
+    let spin = 0;
+
+    const syncBox = () => {
+      const r = hero.getBoundingClientRect();
+      boxLeft = r.left;
+      boxTop = r.top;
+      boxW = r.width;
+      boxH = r.height;
+    };
+
+    /**
+     * Ring diameter tracks the "O" of AWESOMENESS, a touch smaller so it reads
+     * as nested inside the counter rather than covering it.
+     */
+    const measureRing = () => {
+      const o = hero.querySelector<HTMLElement>('[data-ring-gauge="O"]');
+      if (o) {
+        // Cap height of Inter Black is ~0.73em; that is the visual diameter of
+        // an uppercase O. Deriving it from font-size is exact, whereas the
+        // element box includes line-height leading.
+        const fs = parseFloat(getComputedStyle(o).fontSize) || 0;
+        const glyphDiameter = fs * 0.73;
+        // "A tiny bit smaller than the O".
+        radius = Math.max((glyphDiameter * 0.92) / 2, 16);
+      } else {
+        radius = Math.max(Math.min(boxW, boxH) * 0.035, 22);
       }
-      const centerX = (heroBounds.width - noteWidth) / 2;
-      const centerY = (heroBounds.height - noteHeight) / 2;
-      targetX.set(centerX);
-      targetY.set(centerY);
-      setIsMeasured(true);
+      cursorRef.current.r = radius;
+
+      const size = Math.ceil(radius * 2);
+      ring.style.width = `${size}px`;
+      ring.style.height = `${size}px`;
+
+      const svg = ring.querySelector('svg');
+      const path = ring.querySelector('path');
+      const text = ring.querySelector('text');
+      if (svg) svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
+      if (path) {
+        // Text baseline sits just inside the ring edge.
+        const pr = Math.max(radius - Math.max(radius * 0.2, 4), 6);
+        const c = size / 2;
+        path.setAttribute(
+          'd',
+          `M ${c} ${c - pr} A ${pr} ${pr} 0 1 1 ${c - 0.01} ${c - pr}`,
+        );
+        if (text) {
+          // Fit the label exactly once around the circumference.
+          const circumference = 2 * Math.PI * pr;
+          const px = Math.max(6, Math.min(15, (circumference / RING_TEXT.length) * 1.72));
+          text.setAttribute('font-size', String(px));
+          text.setAttribute('letter-spacing', String(px * 0.08));
+        }
+      }
     };
 
-    updateBounds();
-    window.addEventListener('resize', updateBounds, { passive: true });
+    /**
+     * Repaint the darkening overlay onto the canvas at full strength. The hero
+     * image sits underneath in full colour; erasing punches holes in this layer.
+     */
+    const paintOverlay = () => {
+      syncBox();
+      if (boxW < 8 || boxH < 8) return;
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.floor(boxW * dpr);
+      canvas.height = Math.floor(boxH * dpr);
+      canvas.style.width = `${boxW}px`;
+      canvas.style.height = `${boxH}px`;
+
+      ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.clearRect(0, 0, boxW, boxH);
+
+      // Already seen this session: leave the canvas fully transparent so the
+      // hero image reads at its original quality, and never re-darken it.
+      if (overlaySpent) {
+        strokes.clear();
+        return;
+      }
+
+      const src = overlayImgRef.current;
+      if (src && src.complete && src.naturalWidth > 0) {
+        // Draw the SAME image, graded down. Erasing this layer is what exposes
+        // the full-colour original sitting underneath.
+        ctx.filter = 'grayscale(100%) contrast(1.3) brightness(0.35) saturate(0.3)';
+        // object-cover / object-top, matched to the <img> beneath.
+        const scale = Math.max(boxW / src.naturalWidth, boxH / src.naturalHeight);
+        const dw = src.naturalWidth * scale;
+        const dh = src.naturalHeight * scale;
+        ctx.drawImage(src, (boxW - dw) / 2, 0, dw, dh);
+        ctx.filter = 'none';
+      } else {
+        ctx.fillStyle = '#171715';
+        ctx.fillRect(0, 0, boxW, boxH);
+      }
+
+      // The original vertical grade, kept so the composition reads the same.
+      const g = ctx.createLinearGradient(0, 0, 0, boxH);
+      g.addColorStop(0, 'rgba(23,23,21,0.50)');
+      g.addColorStop(0.3, 'rgba(23,23,21,0.30)');
+      g.addColorStop(1, 'rgba(23,23,21,0.88)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, boxW, boxH);
+
+      strokes.clear();
+    };
+
+    /**
+     * Carve a capsule from the emitter's previous point to (x, y). Drawing the
+     * connecting segment (not just a dot) is what makes a fast sweep leave one
+     * continuous clean trail instead of a dotted line.
+     */
+    const erase = (key: number, x: number, y: number, r: number) => {
+      if (!ctx) return;
+      const prev = strokes.get(key);
+      // Nothing meaningful moved: skip the composite op entirely.
+      if (prev && Math.hypot(x - prev.x, y - prev.y) < 0.6) return;
+
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.filter = 'blur(1px)';
+      ctx.fillStyle = '#000';
+      ctx.strokeStyle = '#000';
+
+      if (prev) {
+        ctx.lineWidth = r * 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      }
+
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.filter = 'none';
+      ctx.globalCompositeOperation = 'source-over';
+
+      if (prev) { prev.x = x; prev.y = y; }
+      else strokes.set(key, { x, y });
+    };
+
+    // Handed to the physics solver so every displaced letter carves its own
+    // path through the overlay, exactly like the ring does.
+    bodyTrailRef.current = erase;
+
+    const centre = () => {
+      tx = boxW / 2;
+      ty = boxH / 2;
+      if (!primed) {
+        primed = true;
+        cx = tx;
+        cy = ty;
+      }
+    };
+
+    syncBox();
+    measureRing();
+    paintOverlay();
+    centre();
+
     const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
-    if (fonts && fonts.ready) {
-      fonts.ready.then(updateBounds).catch(() => {});
-    }
+    fonts?.ready
+      .then(() => {
+        measureRing();
+        paintOverlay();
+        centre();
+      })
+      .catch(() => {});
 
-    const handlePointerMove = (e: PointerEvent) => {
-      const padding = 16;
-      const localMouseX = e.clientX - heroBounds.left;
-      const localMouseY = e.clientY - heroBounds.top;
+    const img = overlayImgRef.current;
+    if (img && !img.complete) img.addEventListener('load', paintOverlay);
 
-      const boundedX = Math.max(padding, Math.min(localMouseX + 16, heroBounds.width - noteWidth - padding));
-      const boundedY = Math.max(padding, Math.min(localMouseY + 16, heroBounds.height - noteHeight - padding));
-
-      targetX.set(boundedX);
-      targetY.set(boundedY);
+    let resizeTimer = 0;
+    const onResize = () => {
+      window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => {
+        primed = false;
+        measureRing();
+        paintOverlay();
+        centre();
+      }, 140);
     };
+    window.addEventListener('resize', onResize, { passive: true });
 
-    const handlePointerLeave = () => {
-      const centerX = (heroBounds.width - noteWidth) / 2;
-      const centerY = (heroBounds.height - noteHeight) / 2;
-      targetX.set(centerX);
-      targetY.set(centerY);
+    let scrollTick = false;
+    const onScroll = () => {
+      if (scrollTick) return;
+      scrollTick = true;
+      requestAnimationFrame(() => { scrollTick = false; syncBox(); });
     };
+    window.addEventListener('scroll', onScroll, { passive: true });
 
-    hero.addEventListener('pointermove', handlePointerMove, { passive: true });
-    hero.addEventListener('pointerleave', handlePointerLeave, { passive: true });
+    const onPointerMove = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') return;
+      const x = e.clientX - boxLeft;
+      const y = e.clientY - boxTop;
+
+      // Outside the hero: park the ring back at centre rather than pinning it
+      // to an edge, and stop erasing.
+      if (x < 0 || y < 0 || x > boxW || y > boxH) {
+        pointerSeen = false;
+        // Break only the ring's stroke; re-entering elsewhere must not erase a
+        // straight line from the old exit point. Letter trails are keyed
+        // separately and are unaffected.
+        strokes.delete(RING_STROKE);
+        centre();
+        return;
+      }
+
+      pointerSeen = true;
+      tx = x;
+      ty = y;
+    };
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+
+    // Critically-damped-ish spring: fast enough to feel attached to the
+    // cursor, soft enough to read as a physical object.
+    const STIFF = 300;
+    const DAMP = 30;
+    const MASS = 0.5;
+
+    const frame = (now: number) => {
+      raf = requestAnimationFrame(frame);
+      const dt = lastT ? Math.min((now - lastT) / 1000, 0.032) : 1 / 60;
+      lastT = now;
+
+      vx += ((-STIFF * (cx - tx) - DAMP * vx) / MASS) * dt;
+      vy += ((-STIFF * (cy - ty) - DAMP * vy) / MASS) * dt;
+      cx += vx * dt;
+      cy += vy * dt;
+
+      // Hard clamp: the ring can never leave the hero rectangle.
+      const r = radius;
+      cx = Math.max(r, Math.min(boxW - r, cx));
+      cy = Math.max(r, Math.min(boxH - r, cy));
+
+      // Publish before anything reads it, so ring / eraser / physics all use
+      // one identical position this frame.
+      const c = cursorRef.current;
+      c.x = cx;
+      c.y = cy;
+      c.r = radius;
+      c.active = pointerSeen;
+
+      ring.style.transform = `translate3d(${(cx - r).toFixed(2)}px, ${(cy - r).toFixed(2)}px, 0)`;
+      ring.style.opacity = primed ? '1' : '0';
+
+      if (pointerSeen) {
+        erase(RING_STROKE, cx, cy, radius);
+        // Gentle continuous rotation of the label.
+        // Wrap at 50% — one full label width — so the loop never restarts.
+        spin = (spin + dt * 4.5) % 50;
+        ringTextRef.current?.setAttribute('startOffset', `${spin.toFixed(3)}%`);
+      }
+    };
+    raf = requestAnimationFrame(frame);
 
     return () => {
-      window.removeEventListener('resize', updateBounds);
-      hero.removeEventListener('pointermove', handlePointerMove);
-      hero.removeEventListener('pointerleave', handlePointerLeave);
+      // Leaving the hero (route change or unmount) consumes the overlay.
+      overlaySpent = true;
+      cancelAnimationFrame(raf);
+      bodyTrailRef.current = null;
+      window.clearTimeout(resizeTimer);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('pointermove', onPointerMove);
+      img?.removeEventListener('load', paintOverlay);
     };
-  }, [targetX, targetY]);
+  }, [interactive]);
 
+  const frozen = introComplete && interactive;
 
   return (
     <section
+      id="hero"
       ref={heroRef}
       className="relative h-[100svh] min-h-[540px] flex items-center justify-center overflow-hidden bg-[#171715]"
     >
       <div className="absolute inset-0 z-0">
+        {/* Full-colour source image. The canvas above it holds the darkening
+            overlay that the ring erases. */}
         <img
+          ref={overlayImgRef}
           src="/images/Hero image.webp"
           alt="Papi Raborife"
           className="w-full h-full object-cover object-top"
           fetchPriority="high"
           decoding="async"
-          style={{ filter: 'grayscale(100%) contrast(1.3) brightness(0.35) saturate(0.3)' }}
           onError={(e) => { e.currentTarget.style.display = 'none'; }}
         />
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(23,23,21,0.5),rgba(23,23,21,0.3)30%,rgba(23,23,21,0.88))]" />
+        {interactive ? (
+          <canvas ref={eraserRef} className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden />
+        ) : (
+          // No cursor to erase with — keep the original static treatment.
+          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(23,23,21,0.5),rgba(23,23,21,0.3)30%,rgba(23,23,21,0.88))]" />
+        )}
       </div>
 
       {/* Ambient floating crosses */}
-      <FloatingCross className="absolute top-[12%] left-[7%] z-20 hidden sm:block" size={38} duration={6.5} delay={0} frozen={introComplete} />
-      <FloatingCross className="absolute top-[18%] right-[11%] z-20 hidden md:block" size={24} duration={5.5} delay={0.5} frozen={introComplete} />
-      <FloatingCross className="absolute top-[32%] left-[15%] z-20 hidden md:block" size={28} duration={7} delay={0.3} frozen={introComplete} />
-      <FloatingCross className="absolute top-[8%] right-[26%] z-20 hidden lg:block" size={18} duration={6} delay={0.9} frozen={introComplete} />
-      <FloatingCross className="absolute bottom-[24%] right-[8%] z-20 hidden sm:block" size={30} duration={7.5} delay={0.2} frozen={introComplete} />
-      <FloatingCross className="absolute bottom-[16%] left-[11%] z-20 hidden sm:block" size={22} duration={5.8} delay={1} frozen={introComplete} />
-      <FloatingCross className="absolute top-[48%] left-[4%] z-20 hidden lg:block" size={16} duration={6.2} delay={1.2} frozen={introComplete} />
-      <FloatingCross className="absolute top-[58%] right-[17%] z-20 hidden md:block" size={20} duration={6.4} delay={0.8} frozen={introComplete} />
-      <FloatingCross className="absolute bottom-[38%] left-[22%] z-20 hidden lg:block" size={14} duration={5.2} delay={1.4} frozen={introComplete} />
-      <FloatingCross className="absolute top-[70%] left-[40%] z-20 hidden xl:block" size={16} duration={6.8} delay={0.6} frozen={introComplete} />
+      <FloatingCross className="absolute top-[12%] left-[7%] z-20 hidden sm:block" size={38} duration={6.5} delay={0} frozen={frozen} />
+      <FloatingCross className="absolute top-[18%] right-[11%] z-20 hidden md:block" size={24} duration={5.5} delay={0.5} frozen={frozen} />
+      <FloatingCross className="absolute top-[32%] left-[15%] z-20 hidden md:block" size={28} duration={7} delay={0.3} frozen={frozen} />
+      <FloatingCross className="absolute top-[8%] right-[26%] z-20 hidden lg:block" size={18} duration={6} delay={0.9} frozen={frozen} />
+      <FloatingCross className="absolute bottom-[24%] right-[8%] z-20 hidden sm:block" size={30} duration={7.5} delay={0.2} frozen={frozen} />
+      <FloatingCross className="absolute bottom-[16%] left-[11%] z-20 hidden sm:block" size={22} duration={5.8} delay={1} frozen={frozen} />
+      <FloatingCross className="absolute top-[48%] left-[4%] z-20 hidden lg:block" size={16} duration={6.2} delay={1.2} frozen={frozen} />
+      <FloatingCross className="absolute top-[58%] right-[17%] z-20 hidden md:block" size={20} duration={6.4} delay={0.8} frozen={frozen} />
+      <FloatingCross className="absolute bottom-[38%] left-[22%] z-20 hidden lg:block" size={14} duration={5.2} delay={1.4} frozen={frozen} />
+      <FloatingCross className="absolute top-[70%] left-[40%] z-20 hidden xl:block" size={16} duration={6.8} delay={0.6} frozen={frozen} />
 
       {/* Ambient floating waves */}
-      <FloatingWave className="absolute top-[24%] right-[15%] z-20 hidden md:block" width={140} duration={7.5} delay={0} frozen={introComplete} />
-      <FloatingWave className="absolute top-[44%] left-[3%] z-20 hidden lg:block" width={110} duration={8.5} delay={0.4} frozen={introComplete} />
-      <FloatingWave className="absolute bottom-[32%] right-[5%] z-20 hidden md:block" width={130} duration={7} delay={0.9} frozen={introComplete} />
-      <FloatingWave className="absolute bottom-[14%] left-[17%] z-20 hidden sm:block" width={100} duration={8} delay={0.6} frozen={introComplete} />
-      <FloatingWave className="absolute top-[62%] right-[23%] z-20 hidden lg:block" width={90} duration={6.5} delay={1.1} frozen={introComplete} />
+      <FloatingWave className="absolute top-[24%] right-[15%] z-20 hidden md:block" width={140} duration={7.5} delay={0} frozen={frozen} />
+      <FloatingWave className="absolute top-[44%] left-[3%] z-20 hidden lg:block" width={110} duration={8.5} delay={0.4} frozen={frozen} />
+      <FloatingWave className="absolute bottom-[32%] right-[5%] z-20 hidden md:block" width={130} duration={7} delay={0.9} frozen={frozen} />
+      <FloatingWave className="absolute bottom-[14%] left-[17%] z-20 hidden sm:block" width={100} duration={8} delay={0.6} frozen={frozen} />
+      <FloatingWave className="absolute top-[62%] right-[23%] z-20 hidden lg:block" width={90} duration={6.5} delay={1.1} frozen={frozen} />
 
       {/* Static scribbles for depth */}
       <ScribbleX data-hero-physics="deco" className="absolute top-[20%] left-[28%] w-6 h-6 z-20 opacity-50 rotate-12 hidden md:block" />
@@ -145,31 +447,20 @@ const Hero: React.FC = () => {
 
       <div className="relative z-10 text-center px-4 w-full max-w-[96vw]">
         <h1 className="sr-only">CRAFTING AWESOMENESS SINCE 2015</h1>
-        <motion.p
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
-          className="text-[10px] sm:text-xs md:text-sm font-bold tracking-[0.35em] uppercase mb-6 md:mb-8 text-[#9a9a93]"
-        >
+        <p className="hero-rise text-[10px] sm:text-xs md:text-sm font-bold tracking-[0.35em] uppercase mb-6 md:mb-8 text-[#9a9a93]">
           Papi Raborife
-        </motion.p>
+        </p>
 
         <div className="relative flex flex-col items-center justify-center w-full">
-          <motion.h1
+          <h1
             aria-hidden="true"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.9, ease: 'easeOut' }}
-            className="font-display text-[#f5f3ee] text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] whitespace-nowrap"
+            className="hero-pop font-display text-[#f5f3ee] text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] whitespace-nowrap"
           >
             <HeroLetters text="CRAFTING" />
-          </motion.h1>
+          </h1>
 
-          <motion.h1
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.6, delay: 0.15 }}
-            className="font-display text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] max-w-full whitespace-nowrap"
+          <h1
+            className="hero-fade font-display text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] max-w-full whitespace-nowrap"
             aria-hidden="true"
           >
             <SplitFlapText
@@ -179,33 +470,46 @@ const Hero: React.FC = () => {
               interval={70}
               onComplete={handleIntroComplete}
             />
-          </motion.h1>
+          </h1>
 
-          <motion.h1
+          <h1
             aria-hidden="true"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.9, ease: 'easeOut', delay: 0.3 }}
-            className="font-display text-stroke text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] whitespace-nowrap"
+            className="hero-pop hero-pop-late font-display text-stroke text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] whitespace-nowrap"
           >
             <HeroLetters text="SINCE 2015" />
-          </motion.h1>
+          </h1>
         </div>
       </div>
 
-      {/* "culture led creative" — absolutely positioned inside the hero,
-          centred at rest, clamped to the hero rectangle so it can never
-          escape the section border. */}
-      <motion.div
-        ref={cursorNoteRef}
-        className="absolute top-0 left-0 z-30 pointer-events-none hand-note text-[#d7ff4f] text-base sm:text-lg md:text-2xl font-bold whitespace-nowrap mix-blend-difference"
-        style={{ x: springX, y: springY }}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: isMeasured ? 1 : 0 }}
-        transition={{ opacity: { duration: 0.3 } }}
-      >
-        culture led creative
-      </motion.div>
+      {/* CULTURE LED CREATIVE — a ring that wraps the cursor, sized just under
+          the "O" of AWESOMENESS. Only rendered where there is a real cursor. */}
+      {interactive && (
+        <div
+          ref={ringRef}
+          className="hero-ring absolute top-0 left-0 z-30 pointer-events-none"
+          style={{ opacity: 0 }}
+          aria-hidden
+        >
+          <svg width="100%" height="100%" className="overflow-visible block">
+            <defs>
+              <path id={ringPathId} fill="none" />
+            </defs>
+            <text
+              fill="#d7ff4f"
+              fontFamily="'JetBrains Mono', ui-monospace, SFMono-Regular, monospace"
+              fontWeight="800"
+              paintOrder="stroke"
+              stroke="rgba(23,23,21,0.55)"
+              strokeWidth="2.5"
+              strokeLinejoin="round"
+            >
+              <textPath ref={ringTextRef} href={`#${ringPathId}`} startOffset="0%">
+                {RING_TEXT}
+              </textPath>
+            </text>
+          </svg>
+        </div>
+      )}
 
       <div className="absolute left-4 sm:left-6 bottom-10 md:bottom-12 hidden md:flex flex-col gap-4 text-[10px] md:text-xs font-bold text-[#8f8f88] z-30">
         <Link to="/resume" className="hover:text-[#f5f3ee] transform -rotate-90 tracking-[0.2em]">

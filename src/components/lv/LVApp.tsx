@@ -50,7 +50,7 @@ const Hero = () => {
         <div className="font-lv-bebas text-xs tracking-[0.35em] text-[#f3ead7]/70">SS · 2026</div>
       </div>
 
-      <img
+      <img loading="lazy" decoding="async"
         src="/images/01-the-outlaw.webp"
         alt="Outlandish — Black rider in LV monogram cape on black horse, Drakensberg"
         className="absolute inset-0 h-full w-full object-cover"
@@ -215,7 +215,7 @@ const Lookbook = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="md:col-span-3">
-              <img
+              <img loading="lazy" decoding="async"
                 src={gallery[active].src}
                 alt={gallery[active].title}
                 className="max-h-[80vh] w-full object-contain"
@@ -249,7 +249,7 @@ const Lookbook = () => {
 const Story = () => {
   return (
     <section id="lv-story" className="relative h-[80vh] min-h-[500px] w-full overflow-hidden">
-      <img
+      <img loading="lazy" decoding="async"
         src="/images/09-the-dusk-ride.webp"
         alt="Two riders at dusk in the Bushveld"
         className="absolute inset-0 h-full w-full object-cover"

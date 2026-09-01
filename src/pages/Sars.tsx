@@ -1,5 +1,6 @@
 import React from 'react';
 import '../styles/case-fonts.css';
+import '../styles/case/sars.css';
 import SarsApp from '../components/SarsApp';
 
 const Sars: React.FC = () => {

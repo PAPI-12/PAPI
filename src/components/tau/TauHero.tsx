@@ -27,7 +27,7 @@ export default function Hero() {
 
       {/* ── Background greenhouse photo ── */}
       <div className="absolute inset-0">
-        <img
+        <img loading="lazy" decoding="async"
           src="/images/tau-greenhouse.webp"
           alt="Local South African farm"
           className="w-full h-full object-cover opacity-[0.12]"
@@ -121,7 +121,7 @@ export default function Hero() {
         {/* Right column — phone mockups */}
         <Fade delay={0.25} className="flex-shrink-0 relative">
           <div className="relative w-[300px] sm:w-[360px]">
-            <img
+            <img loading="lazy" decoding="async"
               src="/images/tau-hero-phones.webp"
               alt="TAU FOODS mobile app screens"
               className="w-full drop-shadow-2xl animate-tau-float rounded-2xl"

@@ -1,5 +1,6 @@
 import React from 'react';
 import '../styles/case-fonts.css';
+import '../styles/case/vodacom.css';
 import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import VodacomApp from '../components/vodacom/VodacomApp';

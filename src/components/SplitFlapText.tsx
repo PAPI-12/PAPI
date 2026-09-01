@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 
 const POOL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ&/0123456789';
 
@@ -14,8 +14,10 @@ const WIDTH: Record<string, number> = {
   '5': 0.62, '6': 0.62, '7': 0.6, '8': 0.62, '9': 0.62, '&': 0.92, '/': 0.42,
   ' ': 0.34,
 };
+const FACE_CLASS = 'absolute inset-0 flex items-center justify-center transition-colors duration-300';
+
 const widthOf = (ch: string) => WIDTH[ch] ?? 0.62;
-const display = (ch: string) => (ch === ' ' ? ' ' : ch);
+const display = (ch: string) => (ch === ' ' ? '\u00A0' : ch);
 
 type Props = {
   target: string;
@@ -29,6 +31,20 @@ type Props = {
   onComplete?: () => void;
 };
 
+/**
+ * Split-flap reveal.
+ *
+ * The previous implementation scheduled one `setTimeout` per scramble frame and
+ * called `setState` inside each of them — roughly ninety React re-renders of
+ * the largest text node on the page, all inside the first two seconds of the
+ * visit. That is what made the intro stutter on open.
+ *
+ * It now runs as a single requestAnimationFrame timeline that writes
+ * `textContent` and one data-attribute straight to the tiles. React renders the
+ * markup exactly once; the animation costs no reconciliation at all, and it
+ * self-corrects if the tab is backgrounded (rAF pauses, then it snaps to the
+ * correct state on return instead of firing a burst of stale timers).
+ */
 const SplitFlapText: React.FC<Props> = ({
   target,
   startDelay = 200,
@@ -40,136 +56,161 @@ const SplitFlapText: React.FC<Props> = ({
   inView = true,
   onComplete,
 }) => {
-  const length = target.length;
+  // The hero measures this glyph to size the cursor ring. Tagging the first
+  // occurrence keeps the lookup unambiguous.
+  const gaugeChar = 'O';
+  const gaugeIndex = target.indexOf(gaugeChar);
+
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const tileRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const faceRefs = useRef<Array<HTMLSpanElement | null>>([]);
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
-  const [chars, setChars] = useState<string[]>(() => target.split(''));
-  const [flipping, setFlipping] = useState<boolean[]>(() => Array(length).fill(false));
-  const [settled, setSettled] = useState<boolean[]>(() => Array(length).fill(false));
-  const [visible, setVisible] = useState<boolean>(inView);
-
-  // Gate visibility so off-screen instances never flash a scrambled state,
-  // and so the on-screen reveal reads as a clean fade-into-flip.
-  useEffect(() => {
-    if (inView) {
-      const id = requestAnimationFrame(() => setVisible(true));
-      return () => cancelAnimationFrame(id);
-    }
-    setVisible(false);
-  }, [inView]);
 
   useEffect(() => {
     if (!inView) return;
 
-    const reduce =
-      typeof window !== 'undefined' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const root = rootRef.current;
+    const tiles = tileRefs.current;
+    const faces = faceRefs.current;
+    if (!root) return;
 
-    if (reduce) {
-      setChars(target.split(''));
-      setFlipping(Array(length).fill(false));
-      setSettled(Array(length).fill(true));
+    const chars = Array.from(target);
+    const STEPS = 6;
+    const SCRAMBLE_START = 75;
+
+    const settle = () => {
+      chars.forEach((ch, i) => {
+        const tile = tiles[i];
+        const face = faces[i];
+        if (tile) tile.dataset.flipping = 'false';
+        if (face) {
+          face.textContent = display(ch);
+          face.className = `${FACE_CLASS} ${settledClassName}`;
+        }
+      });
+    };
+
+    root.style.opacity = '1';
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      settle();
       onCompleteRef.current?.();
       return;
     }
 
-    // Fresh start each time we enter view (also keeps Strict Mode honest).
-    setChars(Array(length).fill('X'));
-    setFlipping(Array(length).fill(false));
-    setSettled(Array(length).fill(false));
-
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    const steps = 6;
-    const scrambleStart = 75;
-    let lastSettle = startDelay;
-
-    for (let i = 0; i < length; i++) {
+    // Per-letter schedule, precomputed once.
+    const plan = chars.map((ch, i) => {
       const base = startDelay + i * step;
-      const ch = target[i];
+      const isSpace = ch === ' ';
+      return {
+        ch,
+        isSpace,
+        base,
+        end: isSpace ? base : base + SCRAMBLE_START + STEPS * interval + 50,
+      };
+    });
+    const finishAt = plan.reduce((m, p) => Math.max(m, p.end), startDelay) + 80;
 
-      if (ch === ' ') {
-        timers.push(
-          setTimeout(() => {
-            setChars((c) => c.map((v, j) => (j === i ? ' ' : v)));
-            setSettled((s) => s.map((v, j) => (j === i ? true : v)));
-          }, base),
-        );
-        lastSettle = Math.max(lastSettle, base);
-        continue;
+    // Start blank-ish so nothing flashes the final word before it plays.
+    chars.forEach((_, i) => {
+      const face = faces[i];
+      if (face && chars[i] !== ' ') face.textContent = 'X';
+    });
+
+    const state = chars.map(() => ({ flipping: false, glyph: '', done: false }));
+    let raf = 0;
+    let t0 = 0;
+    let finished = false;
+
+    const frame = (now: number) => {
+      if (!t0) t0 = now;
+      const t = now - t0;
+
+      for (let i = 0; i < plan.length; i++) {
+        const p = plan[i];
+        const s = state[i];
+        if (s.done) continue;
+
+        const tile = tiles[i];
+        const face = faces[i];
+
+        if (t >= p.end) {
+          s.done = true;
+          s.flipping = false;
+          if (tile) tile.dataset.flipping = 'false';
+          if (face) {
+            face.textContent = display(p.ch);
+            face.className = `${FACE_CLASS} ${settledClassName}`;
+          }
+          continue;
+        }
+
+        if (t < p.base || p.isSpace) continue;
+
+        if (!s.flipping) {
+          s.flipping = true;
+          if (tile) tile.dataset.flipping = 'true';
+          if (face) face.className = `${FACE_CLASS} ${flippingClassName}`;
+        }
+
+        const k = Math.floor((t - p.base - SCRAMBLE_START) / interval);
+        if (k < 0) continue;
+        const glyph = k >= STEPS - 1 ? p.ch : POOL[Math.floor(Math.random() * POOL.length)];
+        if (glyph !== s.glyph) {
+          s.glyph = glyph;
+          if (face) face.textContent = display(glyph);
+        }
       }
 
-      timers.push(
-        setTimeout(() => {
-          setFlipping((f) => f.map((v, j) => (j === i ? true : v)));
-        }, base),
-      );
-
-      for (let s = 0; s < steps; s++) {
-        timers.push(
-          setTimeout(() => {
-            setChars((c) =>
-              c.map((v, j) => {
-                if (j !== i) return v;
-                if (s === steps - 1) return target[i];
-                return POOL[Math.floor(Math.random() * POOL.length)];
-              }),
-            );
-          }, base + scrambleStart + s * interval),
-        );
+      if (t >= finishAt) {
+        if (!finished) {
+          finished = true;
+          settle();
+          onCompleteRef.current?.();
+        }
+        return;
       }
+      raf = requestAnimationFrame(frame);
+    };
 
-      const settleAt = base + scrambleStart + steps * interval + 50;
-      lastSettle = Math.max(lastSettle, settleAt);
-      timers.push(
-        setTimeout(() => {
-          setFlipping((f) => f.map((v, j) => (j === i ? false : v)));
-          setSettled((s) => s.map((v, j) => (j === i ? true : v)));
-        }, settleAt),
-      );
-    }
+    raf = requestAnimationFrame(frame);
 
-    timers.push(
-      setTimeout(() => {
-        onCompleteRef.current?.();
-      }, lastSettle + 80),
-    );
-
-    return () => timers.forEach(clearTimeout);
-  }, [inView, target, startDelay, step, interval, length]);
+    return () => {
+      cancelAnimationFrame(raf);
+      // Leaving mid-flight must never strand a scrambled glyph on screen.
+      if (!finished) settle();
+    };
+  }, [inView, target, startDelay, step, interval, settledClassName, flippingClassName]);
 
   return (
     <span
+      ref={rootRef}
       className={className}
-      style={{
-        perspective: '600px',
-        opacity: visible ? 1 : 0,
-        transition: 'opacity 240ms ease',
-      }}
+      style={{ perspective: '600px', opacity: inView ? 1 : 0, transition: 'opacity 240ms ease' }}
       aria-label={target}
     >
-      {chars.map((c, i) => {
-        const t = target[i];
-        return (
-          <span
-            key={i}
-            data-flipping={flipping[i] ? 'true' : 'false'}
-            data-hero-physics={t === ' ' ? undefined : 'letter'}
-            className="splitflap-tile splitflap-hero relative inline-block align-baseline"
-            style={{ width: `${widthOf(t)}em` }}
-          >
-            <span aria-hidden className="invisible">
-              {display(t)}
-            </span>
-            <span
-              className={`absolute inset-0 flex items-center justify-center transition-colors duration-300 ${
-                settled[i] ? settledClassName : flippingClassName
-              }`}
-            >
-              {display(c)}
-            </span>
+      {Array.from(target).map((t, i) => (
+        <span
+          key={i}
+          ref={(el) => { tileRefs.current[i] = el; }}
+          data-flipping="false"
+          data-hero-physics={t === ' ' ? undefined : 'letter'}
+          data-ring-gauge={t === gaugeChar && i === gaugeIndex ? t : undefined}
+          className="splitflap-tile splitflap-hero relative inline-block align-baseline"
+          style={{ width: `${widthOf(t)}em` }}
+        >
+          <span aria-hidden className="invisible">
+            {display(t)}
           </span>
-        );
-      })}
+          <span
+            ref={(el) => { faceRefs.current[i] = el; }}
+            className={`${FACE_CLASS} ${settledClassName}`}
+          >
+            {display(t)}
+          </span>
+        </span>
+      ))}
       <span className="sr-only">{target}</span>
     </span>
   );

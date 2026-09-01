@@ -1,5 +1,4 @@
 import React from 'react';
-import { motion } from 'framer-motion';
 
 export const ScribbleX = ({
   className,
@@ -32,6 +31,15 @@ export const ScribbleWave = ({
   </svg>
 );
 
+/**
+ * Ambient floaters.
+ *
+ * These used to be framer-motion `animate` loops. Fifteen of them run at once
+ * in the hero, and each one ticks on the main thread every frame — enough to
+ * visibly cost frames during the intro and while scrolling. They are now pure
+ * CSS keyframes, which the compositor runs off-thread for free, and they honour
+ * prefers-reduced-motion via the stylesheet.
+ */
 export const FloatingCross = ({
   className,
   size = 28,
@@ -50,17 +58,12 @@ export const FloatingCross = ({
     className={`pointer-events-none select-none ${className || ''}`}
     style={{ width: size, height: size }}
   >
-    {frozen ? (
+    <div
+      className={frozen ? 'w-full h-full' : 'float-cross w-full h-full'}
+      style={frozen ? undefined : { animationDuration: `${duration}s`, animationDelay: `${delay}s` }}
+    >
       <ScribbleX className="w-full h-full" />
-    ) : (
-      <motion.div
-        className="w-full h-full"
-        animate={{ y: [0, -12, 0, 10, 0], rotate: [0, 14, 0, -12, 0], scale: [1, 1.08, 1] }}
-        transition={{ duration, delay, repeat: Infinity, ease: 'easeInOut' }}
-      >
-        <ScribbleX className="w-full h-full" />
-      </motion.div>
-    )}
+    </div>
   </div>
 );
 
@@ -82,16 +85,11 @@ export const FloatingWave = ({
     className={`pointer-events-none select-none ${className || ''}`}
     style={{ width }}
   >
-    {frozen ? (
+    <div
+      className={frozen ? 'w-full' : 'float-wave w-full'}
+      style={frozen ? undefined : { animationDuration: `${duration}s`, animationDelay: `${delay}s` }}
+    >
       <ScribbleWave className="w-full h-auto" />
-    ) : (
-      <motion.div
-        className="w-full"
-        animate={{ x: [0, 14, 0, -10, 0], opacity: [0.45, 0.9, 0.45] }}
-        transition={{ duration, delay, repeat: Infinity, ease: 'easeInOut' }}
-      >
-        <ScribbleWave className="w-full h-auto" />
-      </motion.div>
-    )}
+    </div>
   </div>
 );
