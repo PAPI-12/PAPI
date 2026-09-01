@@ -108,6 +108,7 @@ export function useHeroPhysics(
     let running = true;
     let visible = true;
     let resizeTimer = 0;
+    let asleep = false;
 
     const mouse = {
       x: 0,
@@ -178,7 +179,16 @@ export function useHeroPhysics(
 
     window.addEventListener('resize', scheduleMeasure, { passive: true });
     window.addEventListener('orientationchange', scheduleMeasure, { passive: true });
-    window.addEventListener('scroll', syncBox, { passive: true });
+    let boxTick = false;
+    const onScroll = () => {
+      if (boxTick) return;
+      boxTick = true;
+      requestAnimationFrame(() => {
+        boxTick = false;
+        syncBox();
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
 
     const io = new IntersectionObserver(([entry]) => {
       visible = !!entry?.isIntersecting;
@@ -188,7 +198,9 @@ export function useHeroPhysics(
 
     const onPointerMove = (e: PointerEvent) => {
       if (e.pointerType === 'touch') return;
-      syncBox();
+      // Geometry comes from the cached box (kept fresh by scroll/resize
+      // listeners). Calling getBoundingClientRect here forced a layout flush
+      // on every single mouse move, which is what made the hero feel sticky.
       const x = e.clientX - boxLeft;
       const y = e.clientY - boxTop;
       const inside = x >= -12 && y >= -12 && x <= heroW + 12 && y <= heroH + 12;
@@ -223,6 +235,7 @@ export function useHeroPhysics(
         b.vy += (mouse.vy / speed) * push * 1.15 + (ny / dist) * (push * 0.35);
         b.vr += clamp((nx * mouse.vy - ny * mouse.vx) * 0.08, -14, 14);
         lastHit = now;
+        asleep = false;
       }
     };
 
@@ -238,11 +251,26 @@ export function useHeroPhysics(
     const integrate = (now: number) => {
       if (!running) return;
       raf = requestAnimationFrame(integrate);
-      if (!visible) return;
+      if (!visible || document.hidden) {
+        // Reset the clock so re-entering doesn't integrate one giant dt and
+        // fling every letter across the screen.
+        lastT = 0;
+        return;
+      }
+
+      const idle = now - lastHit > IDLE_MS;
+
+      // Everything has settled back home and nothing is being pushed: there is
+      // no work to do, so skip the whole solve. Previously this loop kept
+      // running full collision detection forever at 60fps, pinning a core and
+      // draining battery even while the hero sat perfectly still.
+      if (idle && asleep) {
+        lastT = 0;
+        return;
+      }
 
       const dt = lastT ? clamp((now - lastT) / 1000, 0.008, 0.032) : 1 / 60;
       lastT = now;
-      const idle = now - lastHit > IDLE_MS;
       const n = bodies.length;
 
       for (let i = 0; i < n; i++) {
@@ -323,7 +351,12 @@ export function useHeroPhysics(
         }
       }
 
-      for (let i = 0; i < n; i++) applyTransform(bodies[i]);
+      let allStill = true;
+      for (let i = 0; i < n; i++) {
+        applyTransform(bodies[i]);
+        if (bodies[i].dirty) allStill = false;
+      }
+      asleep = allStill;
     };
 
     raf = requestAnimationFrame(integrate);
@@ -334,7 +367,7 @@ export function useHeroPhysics(
       window.clearTimeout(resizeTimer);
       window.removeEventListener('resize', scheduleMeasure);
       window.removeEventListener('orientationchange', scheduleMeasure);
-      window.removeEventListener('scroll', syncBox);
+      window.removeEventListener('scroll', onScroll);
       io.disconnect();
       hero.removeEventListener('pointermove', onPointerMove);
       hero.removeEventListener('pointerleave', onPointerLeave);

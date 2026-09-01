@@ -47,7 +47,7 @@ export default function PieceModal({ item, ytId, onClose }: Props) {
               allowFullScreen
             />
           ) : (
-            <img
+            <img loading="lazy" decoding="async"
               src={item.src}
               alt={item.label}
               className="h-full w-full object-cover"

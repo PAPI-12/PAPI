@@ -1,8 +1,4 @@
 import React, { useEffect, useRef } from 'react';
-import gsap from 'gsap';
-import { ScrollTrigger } from 'gsap/ScrollTrigger';
-
-gsap.registerPlugin(ScrollTrigger);
 
 const SKILLS = [
   { title: 'UX/UI DESIGN', note: 'interfaces with instinct', color: '#f5f3ee' },
@@ -106,32 +102,75 @@ const WhatIDo: React.FC = () => {
 
     paint(0);
 
-    const ctx = gsap.context(() => {
-      ScrollTrigger.create({
-        trigger: root,
-        start: 'top top',
-        end: '+=320%',
-        pin: true,
-        pinSpacing: true,
-        scrub: 0.7,
-        anticipatePin: 1,
-        invalidateOnRefresh: true,
-        onUpdate: (self) => {
-          const n = SKILLS.length;
-          const p = self.progress;
-          const hold = 0.08;
-          const t = clamp01((p - hold) / (1 - hold * 2));
-          paint(t * (n - 1));
-        },
-      });
-    }, root);
+    // GSAP + ScrollTrigger are ~45kB gzipped and are only needed once this
+    // section is actually approaching the viewport. Loading them lazily keeps
+    // them off the initial critical path, so the hero paints without waiting.
+    let cancelled = false;
+    let cleanupAnimation: (() => void) | null = null;
 
-    const onResize = () => ScrollTrigger.refresh();
-    window.addEventListener('resize', onResize, { passive: true });
+    const boot = async () => {
+      const [{ default: gsap }, { ScrollTrigger }] = await Promise.all([
+        import('gsap'),
+        import('gsap/ScrollTrigger'),
+      ]);
+      if (cancelled) return;
+
+      gsap.registerPlugin(ScrollTrigger);
+
+      const ctx = gsap.context(() => {
+        ScrollTrigger.create({
+          trigger: root,
+          start: 'top top',
+          end: '+=320%',
+          pin: true,
+          pinSpacing: true,
+          scrub: 0.7,
+          anticipatePin: 1,
+          invalidateOnRefresh: true,
+          onUpdate: (self) => {
+            const n = SKILLS.length;
+            const p = self.progress;
+            const hold = 0.08;
+            const t = clamp01((p - hold) / (1 - hold * 2));
+            paint(t * (n - 1));
+          },
+        });
+      }, root);
+
+      // Pinning measures layout; fonts landing later shift it. Re-measure once.
+      const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
+      fonts?.ready.then(() => { if (!cancelled) ScrollTrigger.refresh(); }).catch(() => {});
+
+      let resizeTimer = 0;
+      const onResize = () => {
+        window.clearTimeout(resizeTimer);
+        resizeTimer = window.setTimeout(() => ScrollTrigger.refresh(), 180);
+      };
+      window.addEventListener('resize', onResize, { passive: true });
+
+      cleanupAnimation = () => {
+        window.clearTimeout(resizeTimer);
+        window.removeEventListener('resize', onResize);
+        ctx.revert();
+      };
+    };
+
+    // Only pay for it when the section is within a screen of the viewport.
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          io.disconnect();
+          boot();
+        }
+      },
+      { rootMargin: '100% 0px' },
+    );
+    io.observe(root);
 
     return () => {
-      ctx.revert();
-      window.removeEventListener('resize', onResize);
+      cancelled = true;
+      io.disconnect();
+      cleanupAnimation?.();
     };
   }, []);
 

@@ -124,7 +124,7 @@ const FeaturedProject: React.FC<{ project: Project; reverse?: boolean }> = ({ pr
         {...linkProps}
         className={`col-span-1 lg:col-span-7 ${reverse ? 'lg:order-2' : ''} block relative aspect-[16/10] md:aspect-[16/9] overflow-hidden rounded-2xl md:rounded-[2.5rem]`}
       >
-        <img src={project.image} alt={project.title} className="w-full h-full object-cover grayscale brightness-[0.5] group-hover:grayscale-0 group-hover:brightness-[0.65] group-hover:scale-[1.04] transition-all duration-[900ms]" />
+        <img loading="lazy" decoding="async" src={project.image} alt={project.title} className="w-full h-full object-cover grayscale brightness-[0.5] group-hover:grayscale-0 group-hover:brightness-[0.65] group-hover:scale-[1.04] transition-all duration-[900ms]" />
         <div className="absolute inset-0 bg-gradient-to-t from-[#171715]/80 via-transparent to-transparent" />
         <div className="absolute bottom-4 right-4 md:bottom-5 md:right-5 text-[9px] md:text-[10px] font-black tracking-[0.3em] text-white/50 uppercase">{project.year}</div>
       </Wrapper>

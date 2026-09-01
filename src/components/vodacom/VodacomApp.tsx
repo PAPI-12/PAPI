@@ -138,7 +138,7 @@ const Hero = () => (
     {/* Hero image strip */}
     <div className="relative max-w-[1400px] mx-auto px-5 md:px-10 pb-14">
       <div className="relative rounded-[28px] overflow-hidden border border-[#1B1210]/15 shadow-[0_30px_60px_-30px_rgba(0,0,0,.35)]">
-        <img
+        <img loading="lazy" decoding="async"
           src="/images/hero-collage.webp"
           alt="Vodacom Ready Business Monopoly campaign — flat lay of print ads"
           className="w-full h-[52vh] md:h-[70vh] object-cover"
@@ -323,7 +323,7 @@ const MagazineFeature = () => (
       {/* Framed magazine */}
       <div className="relative rounded-[36px] bg-[#1B1210] p-3 md:p-5">
         <div className="rounded-[26px] overflow-hidden relative">
-          <img
+          <img loading="lazy" decoding="async"
             src="/images/monopoly-spread.webp"
             alt="Monopoly Magazine Print — Vodacom Ready Business double page spread"
             className="w-full h-auto object-cover"

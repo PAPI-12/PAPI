@@ -12,7 +12,7 @@ const About: React.FC = () => {
         <ScribbleX className="absolute top-16 md:top-20 right-4 md:right-10 w-6 h-6 md:w-8 md:h-8 opacity-60" />
         <div className="absolute inset-y-0 right-0 w-[46%] md:w-[38%] lg:w-[34%] hidden md:block pointer-events-none">
           <div className="relative h-full w-full">
-            <img
+            <img loading="lazy" decoding="async"
               src="/images/about-hero.webp"
               alt="Papi Raborife"
               className="absolute inset-0 h-full w-full object-cover object-top grayscale contrast-[1.05] brightness-[0.85]"
@@ -50,7 +50,7 @@ const About: React.FC = () => {
             </motion.div>
           </div>
           <div className="md:hidden mt-8 -mx-4 sm:-mx-6">
-            <img
+            <img loading="lazy" decoding="async"
               src="/images/about-hero.webp"
               alt="Papi Raborife"
               className="w-full h-[52vw] object-cover object-top grayscale contrast-[1.05] brightness-[0.85]"

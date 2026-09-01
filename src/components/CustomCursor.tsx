@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, useSpring } from 'framer-motion';
 import { useMouse } from '../context/MouseContext';
 
 const CustomCursor: React.FC = () => {
   const { mouseX, mouseY, cursorSize } = useMouse();
   const [isHovering, setIsHovering] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+  const hoverRef = useRef(false);
 
   const springConfig = { stiffness: 420, damping: 32, mass: 0.35 };
   const smoothX = useSpring(mouseX, springConfig);
@@ -14,24 +16,40 @@ const CustomCursor: React.FC = () => {
   const dotX = useSpring(mouseX, dotSpringConfig);
   const dotY = useSpring(mouseY, dotSpringConfig);
 
+  // Only mount the custom cursor on devices that actually have one. On touch
+  // this component was still running two springs against every mouse event.
   useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia('(pointer: fine)').matches) return;
+    if (typeof window === 'undefined') return;
+    const fine =
+      window.matchMedia('(pointer: fine)').matches &&
+      window.matchMedia('(hover: hover)').matches;
+    setEnabled(fine);
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) return;
 
     const handleMouseOver = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
+      const target = e.target as HTMLElement | null;
       if (!target) return;
-      const isLink =
+      const next =
         target.tagName === 'A' ||
         target.tagName === 'BUTTON' ||
-        !!target.closest('a') ||
-        !!target.closest('button') ||
-        target.classList.contains('cursor-pointer');
-      setIsHovering(isLink);
+        !!target.closest('a,button,[role="button"],.cursor-pointer');
+
+      // Guard on a ref so we only re-render React when the state truly flips.
+      // Without this, every mouseover (hundreds per second across a dense
+      // layout) triggered a state update and a full cursor re-render.
+      if (next === hoverRef.current) return;
+      hoverRef.current = next;
+      setIsHovering(next);
     };
 
     window.addEventListener('mouseover', handleMouseOver, { passive: true });
     return () => window.removeEventListener('mouseover', handleMouseOver);
-  }, []);
+  }, [enabled]);
+
+  if (!enabled) return null;
 
   const isLarge = cursorSize === 'large';
   const size = isHovering ? 60 : isLarge ? 56 : 24;
@@ -47,7 +65,7 @@ const CustomCursor: React.FC = () => {
           translateY: '-50%',
           width: size,
           height: size,
-          willChange: 'transform, width, height',
+          willChange: 'transform',
           backfaceVisibility: 'hidden',
           backgroundColor: 'transparent',
         }}
@@ -69,4 +87,3 @@ const CustomCursor: React.FC = () => {
 };
 
 export default CustomCursor;
-

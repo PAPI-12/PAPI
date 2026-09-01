@@ -35,7 +35,7 @@ export default function Skater() {
         </div>
 
         <div className="mt-12 overflow-hidden border-y-[3px] border-cornetto-ink">
-          <img
+          <img loading="lazy" decoding="async"
             src="/images/south-african-skater-crew.webp"
             alt="South African Gen Z skaters posing together at a concrete skatepark"
             className="h-[360px] w-full object-cover object-center md:h-[620px]"

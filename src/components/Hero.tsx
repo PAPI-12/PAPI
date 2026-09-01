@@ -43,67 +43,103 @@ const Hero: React.FC = () => {
 
   useHeroPhysics(heroRef, introComplete && physicsEnabled);
 
+  // Safety net: if the split-flap never reports completion (tab was
+  // backgrounded, timers throttled), still hand control to the physics layer.
+  useEffect(() => {
+    const t = window.setTimeout(() => setIntroComplete(true), 4200);
+    return () => window.clearTimeout(t);
+  }, []);
+
   useEffect(() => {
     const hero = heroRef.current;
     if (!hero) return;
 
-    let heroBounds = hero.getBoundingClientRect();
     let noteWidth = cursorNoteRef.current?.offsetWidth || 180;
     let noteHeight = cursorNoteRef.current?.offsetHeight || 32;
+    // Cached hero geometry. Kept fresh by resize/scroll rather than being
+    // re-measured on every pointer move (that caused a forced reflow per
+    // mousemove, and went stale on scroll so the note drifted off-centre).
+    let boxLeft = 0;
+    let boxTop = 0;
+    let boxWidth = 0;
+    let boxHeight = 0;
 
-    const updateBounds = () => {
-      if (!hero) return;
-      heroBounds = hero.getBoundingClientRect();
+    const syncBox = () => {
+      const r = hero.getBoundingClientRect();
+      boxLeft = r.left;
+      boxTop = r.top;
+      boxWidth = r.width;
+      boxHeight = r.height;
+    };
+
+    const centre = () => {
+      targetX.set((boxWidth - noteWidth) / 2);
+      targetY.set((boxHeight - noteHeight) / 2);
+    };
+
+    const measure = () => {
+      syncBox();
       if (cursorNoteRef.current) {
         noteWidth = cursorNoteRef.current.offsetWidth || 180;
         noteHeight = cursorNoteRef.current.offsetHeight || 32;
       }
-      const centerX = (heroBounds.width - noteWidth) / 2;
-      const centerY = (heroBounds.height - noteHeight) / 2;
-      targetX.set(centerX);
-      targetY.set(centerY);
+      centre();
       setIsMeasured(true);
     };
 
-    updateBounds();
-    window.addEventListener('resize', updateBounds, { passive: true });
+    measure();
+
+    let resizeTimer = 0;
+    const onResize = () => {
+      window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(measure, 120);
+    };
+
+    window.addEventListener('resize', onResize, { passive: true });
+    window.addEventListener('scroll', syncBox, { passive: true });
+
     const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
-    if (fonts && fonts.ready) {
-      fonts.ready.then(updateBounds).catch(() => {});
-    }
+    if (fonts?.ready) fonts.ready.then(measure).catch(() => {});
 
+    let inside = false;
     const handlePointerMove = (e: PointerEvent) => {
+      // Touch taps fire a synthetic pointermove; ignore so the note stays put.
+      if (e.pointerType === 'touch') return;
+
       const padding = 16;
-      const localMouseX = e.clientX - heroBounds.left;
-      const localMouseY = e.clientY - heroBounds.top;
+      const localX = e.clientX - boxLeft;
+      const localY = e.clientY - boxTop;
+      const within = localX >= 0 && localY >= 0 && localX <= boxWidth && localY <= boxHeight;
 
-      const boundedX = Math.max(padding, Math.min(localMouseX + 16, heroBounds.width - noteWidth - padding));
-      const boundedY = Math.max(padding, Math.min(localMouseY + 16, heroBounds.height - noteHeight - padding));
+      if (!within) {
+        if (inside) {
+          inside = false;
+          centre();
+        }
+        return;
+      }
+      inside = true;
 
-      targetX.set(boundedX);
-      targetY.set(boundedY);
+      targetX.set(Math.max(padding, Math.min(localX + 16, boxWidth - noteWidth - padding)));
+      targetY.set(Math.max(padding, Math.min(localY + 16, boxHeight - noteHeight - padding)));
     };
 
-    const handlePointerLeave = () => {
-      const centerX = (heroBounds.width - noteWidth) / 2;
-      const centerY = (heroBounds.height - noteHeight) / 2;
-      targetX.set(centerX);
-      targetY.set(centerY);
-    };
-
-    hero.addEventListener('pointermove', handlePointerMove, { passive: true });
-    hero.addEventListener('pointerleave', handlePointerLeave, { passive: true });
+    // Listening on window (not the section) means leaving the hero in any
+    // direction re-centres the note instead of leaving it stuck at the edge.
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
 
     return () => {
-      window.removeEventListener('resize', updateBounds);
-      hero.removeEventListener('pointermove', handlePointerMove);
-      hero.removeEventListener('pointerleave', handlePointerLeave);
+      window.clearTimeout(resizeTimer);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', syncBox);
+      window.removeEventListener('pointermove', handlePointerMove);
     };
   }, [targetX, targetY]);
 
 
   return (
     <section
+      id="hero"
       ref={heroRef}
       className="relative h-[100svh] min-h-[540px] flex items-center justify-center overflow-hidden bg-[#171715]"
     >
@@ -121,23 +157,23 @@ const Hero: React.FC = () => {
       </div>
 
       {/* Ambient floating crosses */}
-      <FloatingCross className="absolute top-[12%] left-[7%] z-20 hidden sm:block" size={38} duration={6.5} delay={0} frozen={introComplete} />
-      <FloatingCross className="absolute top-[18%] right-[11%] z-20 hidden md:block" size={24} duration={5.5} delay={0.5} frozen={introComplete} />
-      <FloatingCross className="absolute top-[32%] left-[15%] z-20 hidden md:block" size={28} duration={7} delay={0.3} frozen={introComplete} />
-      <FloatingCross className="absolute top-[8%] right-[26%] z-20 hidden lg:block" size={18} duration={6} delay={0.9} frozen={introComplete} />
-      <FloatingCross className="absolute bottom-[24%] right-[8%] z-20 hidden sm:block" size={30} duration={7.5} delay={0.2} frozen={introComplete} />
-      <FloatingCross className="absolute bottom-[16%] left-[11%] z-20 hidden sm:block" size={22} duration={5.8} delay={1} frozen={introComplete} />
-      <FloatingCross className="absolute top-[48%] left-[4%] z-20 hidden lg:block" size={16} duration={6.2} delay={1.2} frozen={introComplete} />
-      <FloatingCross className="absolute top-[58%] right-[17%] z-20 hidden md:block" size={20} duration={6.4} delay={0.8} frozen={introComplete} />
-      <FloatingCross className="absolute bottom-[38%] left-[22%] z-20 hidden lg:block" size={14} duration={5.2} delay={1.4} frozen={introComplete} />
-      <FloatingCross className="absolute top-[70%] left-[40%] z-20 hidden xl:block" size={16} duration={6.8} delay={0.6} frozen={introComplete} />
+      <FloatingCross className="absolute top-[12%] left-[7%] z-20 hidden sm:block" size={38} duration={6.5} delay={0} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute top-[18%] right-[11%] z-20 hidden md:block" size={24} duration={5.5} delay={0.5} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute top-[32%] left-[15%] z-20 hidden md:block" size={28} duration={7} delay={0.3} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute top-[8%] right-[26%] z-20 hidden lg:block" size={18} duration={6} delay={0.9} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute bottom-[24%] right-[8%] z-20 hidden sm:block" size={30} duration={7.5} delay={0.2} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute bottom-[16%] left-[11%] z-20 hidden sm:block" size={22} duration={5.8} delay={1} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute top-[48%] left-[4%] z-20 hidden lg:block" size={16} duration={6.2} delay={1.2} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute top-[58%] right-[17%] z-20 hidden md:block" size={20} duration={6.4} delay={0.8} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute bottom-[38%] left-[22%] z-20 hidden lg:block" size={14} duration={5.2} delay={1.4} frozen={introComplete && physicsEnabled} />
+      <FloatingCross className="absolute top-[70%] left-[40%] z-20 hidden xl:block" size={16} duration={6.8} delay={0.6} frozen={introComplete && physicsEnabled} />
 
       {/* Ambient floating waves */}
-      <FloatingWave className="absolute top-[24%] right-[15%] z-20 hidden md:block" width={140} duration={7.5} delay={0} frozen={introComplete} />
-      <FloatingWave className="absolute top-[44%] left-[3%] z-20 hidden lg:block" width={110} duration={8.5} delay={0.4} frozen={introComplete} />
-      <FloatingWave className="absolute bottom-[32%] right-[5%] z-20 hidden md:block" width={130} duration={7} delay={0.9} frozen={introComplete} />
-      <FloatingWave className="absolute bottom-[14%] left-[17%] z-20 hidden sm:block" width={100} duration={8} delay={0.6} frozen={introComplete} />
-      <FloatingWave className="absolute top-[62%] right-[23%] z-20 hidden lg:block" width={90} duration={6.5} delay={1.1} frozen={introComplete} />
+      <FloatingWave className="absolute top-[24%] right-[15%] z-20 hidden md:block" width={140} duration={7.5} delay={0} frozen={introComplete && physicsEnabled} />
+      <FloatingWave className="absolute top-[44%] left-[3%] z-20 hidden lg:block" width={110} duration={8.5} delay={0.4} frozen={introComplete && physicsEnabled} />
+      <FloatingWave className="absolute bottom-[32%] right-[5%] z-20 hidden md:block" width={130} duration={7} delay={0.9} frozen={introComplete && physicsEnabled} />
+      <FloatingWave className="absolute bottom-[14%] left-[17%] z-20 hidden sm:block" width={100} duration={8} delay={0.6} frozen={introComplete && physicsEnabled} />
+      <FloatingWave className="absolute top-[62%] right-[23%] z-20 hidden lg:block" width={90} duration={6.5} delay={1.1} frozen={introComplete && physicsEnabled} />
 
       {/* Static scribbles for depth */}
       <ScribbleX data-hero-physics="deco" className="absolute top-[20%] left-[28%] w-6 h-6 z-20 opacity-50 rotate-12 hidden md:block" />

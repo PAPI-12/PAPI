@@ -11,7 +11,7 @@ export default function Overview() {
           <div className="relative rounded-3xl overflow-hidden bg-[#0d1a10] border border-[#243d2c] tau-card-glow">
             {/* Greenhouse image strip */}
             <div className="relative h-56 sm:h-72 overflow-hidden">
-              <img
+              <img loading="lazy" decoding="async"
                 src="/images/tau-greenhouse.webp"
                 alt="South African greenhouse — local farming"
                 className="w-full h-full object-cover opacity-60"
@@ -30,7 +30,7 @@ export default function Overview() {
 
               {/* Phone mockup strip */}
               <div className="absolute right-0 top-0 bottom-0 w-64 sm:w-80">
-                <img
+                <img loading="lazy" decoding="async"
                   src="/images/tau-hero-phones.webp"
                   alt="TAU FOODS app screens"
                   className="w-full h-full object-cover opacity-80"

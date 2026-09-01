@@ -252,7 +252,7 @@ function CultureScreen({ culture, go, reset }: { culture: Culture | null; go: (s
       <AppHeader title={safeCulture} onBack={() => go("menu")} onReset={reset} />
       <div className="px-6 pt-4">
         <div className="overflow-hidden rounded-2xl border border-white/20 bg-white/10">
-          <img src={safeCulture === "Skater" ? "/images/south-african-skater-crew.webp" : "/images/cornetto-crew.webp"} alt={`${safeCulture} culture`} className="h-48 w-full object-cover" />
+          <img loading="lazy" decoding="async" src={safeCulture === "Skater" ? "/images/south-african-skater-crew.webp" : "/images/cornetto-crew.webp"} alt={`${safeCulture} culture`} className="h-48 w-full object-cover" />
           <div className="p-4"><p className="font-corn-display text-2xl leading-none">{safeCulture.toUpperCase()} CULTURE</p><p className="mt-2 text-xs font-semibold text-white/70">Back your people, unlock the drop and tell us where the van should pull up.</p></div>
         </div>
         <div className="mt-5 space-y-3">

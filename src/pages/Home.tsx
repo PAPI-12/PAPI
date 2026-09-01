@@ -22,7 +22,7 @@ const Home: React.FC = () => {
       <div className="relative">
         <section className="sticky top-0 z-0 h-[100svh] min-h-[540px] w-full overflow-hidden bg-[#171715]">
           <div className="absolute inset-0">
-            <img
+            <img loading="lazy"
               src="/images/PAPI RABORIFE ABOUT COVER.webp"
               alt="Papi Raborife"
               className="w-full h-full object-cover object-center grayscale contrast-[1.05] brightness-[0.55]"
