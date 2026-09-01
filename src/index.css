@@ -131,6 +131,20 @@
   .robot-line[data-caret='true']::after { animation: none; opacity: 0; }
 }
 
+/* Matrix hand-off guide: the caret at the foot of the What I Do stage that
+   points the visitor down into Featured Work once the machine hands over. */
+@keyframes matrix-guide-drop {
+  0%, 100% { transform: translateY(0); opacity: 1; }
+  50%      { transform: translateY(5px); opacity: 0.45; }
+}
+.matrix-guide-caret {
+  animation: matrix-guide-drop 1.1s ease-in-out infinite;
+  text-shadow: 0 0 12px rgba(74, 222, 128, 0.8);
+}
+@media (prefers-reduced-motion: reduce) {
+  .matrix-guide-caret { animation: none; }
+}
+
 /* Cursor ring carrying CULTURE LED CREATIVE. Its size and position are set
    from JS each frame; this only establishes the compositor layer. */
 .hero-ring {

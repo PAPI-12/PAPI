@@ -18,6 +18,10 @@ import { useEffect } from 'react';
  * - The rAF loop stops the moment it arrives; it never idles.
  * - Bounded per-event delta, so a trackpad fling or a "scroll to bottom"
  *   gesture cannot overshoot into a long uninterruptible glide.
+ * - The pending glide can never run more than ~0.85 screens ahead of the
+ *   current position. Without that cap, a hard inertial fling accumulates a
+ *   target screens ahead and warps straight through pinned sections
+ *   (What I Do) in fast-forward — the exact "it never stops me" failure.
  */
 
 const clamp = (v: number, min: number, max: number) => (v < min ? min : v > max ? max : v);
@@ -116,7 +120,15 @@ export function useSmoothScroll() {
       // If we are not currently animating, base the new target on where the
       // page actually is, not on a stale value.
       const base = animating ? target : window.scrollY;
-      const next = clamp(base + delta, 0, max);
+      let next = base + delta;
+      // No matter how much inertia a fling feeds in, the glide may only ever
+      // lead the real position by ~0.85 screens. Trackpads keep emitting
+      // events while the fingers move, so deliberate fast scrolling keeps its
+      // glide; a released fling, however, dies inside one screen and can
+      // never warp through a pinned sequence.
+      const lead = window.innerHeight * 0.85;
+      next = clamp(next, window.scrollY - lead, window.scrollY + lead);
+      next = clamp(next, 0, max);
 
       // At a boundary there is nothing to do; let the browser behave normally
       // (this also keeps overscroll / pull-to-refresh semantics intact).
