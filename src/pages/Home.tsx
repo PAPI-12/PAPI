@@ -1,11 +1,11 @@
 import React from 'react';
-import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import Hero from '../components/Hero';
 import Clients from '../components/Clients';
 import WhatIDo from '../components/WhatIDo';
 import CTAButton from '../components/CTAButton';
 import { ScribbleX } from '../components/Scribbles';
+import Reveal from '../components/Reveal';
 
 const Home: React.FC = () => {
   const projects = [
@@ -36,12 +36,7 @@ const Home: React.FC = () => {
 
           <div className="relative z-10 h-full flex items-end md:items-center px-4 sm:px-6 lg:px-12 xl:px-24 py-20 md:py-32">
             <div className="max-w-[1600px] w-full mx-auto">
-              <motion.div
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                className="max-w-3xl"
-              >
+              <Reveal className="max-w-3xl">
                 <p className="text-[10px] md:text-xs font-bold tracking-[0.3em] uppercase mb-5 md:mb-6 text-[#8f8f88]">
                   About
                 </p>
@@ -57,7 +52,7 @@ const Home: React.FC = () => {
                   <CTAButton to="/about">MORE ABOUT ME</CTAButton>
                   <span className="hand-note text-[#d7c4aa] text-lg md:text-2xl rotate-[-3deg]">the maker · JHB SA</span>
                 </div>
-              </motion.div>
+              </Reveal>
             </div>
           </div>
 
@@ -80,12 +75,10 @@ const Home: React.FC = () => {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 md:gap-6">
             {projects.map((project, index) => (
-              <motion.article
+              <Reveal
                 key={index}
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: index * 0.12 }}
+                as="article"
+                delay={index * 0.12}
                 className="group relative aspect-[4/5] rounded-2xl overflow-hidden"
               >
                 <Link to={project.link}>
@@ -102,7 +95,7 @@ const Home: React.FC = () => {
                     <h3 className="text-xl md:text-3xl font-display text-[#f5f3ee]">{project.title}</h3>
                   </div>
                 </Link>
-              </motion.article>
+              </Reveal>
             ))}
           </div>
         </div>
@@ -112,13 +105,13 @@ const Home: React.FC = () => {
 
       <section className="px-4 sm:px-6 lg:px-12 xl:px-24 py-20 md:py-32">
         <div className="max-w-[1600px] mx-auto text-center">
-          <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
+          <Reveal>
             <p className="hand-note text-[#d7c4aa] text-2xl md:text-4xl mb-4">let's build something unforgettable</p>
             <h2 className="text-[13vw] md:text-[8vw] font-display leading-[0.85] text-[#f5f3ee] mb-8">
               READY TO<br /><span className="text-[#d7ff4f]">COLLABORATE?</span>
             </h2>
             <CTAButton to="/contact">GET IN TOUCH</CTAButton>
-          </motion.div>
+          </Reveal>
         </div>
       </section>
     </div>

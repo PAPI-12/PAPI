@@ -45,7 +45,6 @@ export default defineConfig({
           if (!id.includes("node_modules")) return;
           if (id.includes("react-dom") || /node_modules\/react\//.test(id)) return "react";
           if (id.includes("framer-motion") || id.includes("motion-dom") || id.includes("motion-utils")) return "motion";
-          if (id.includes("gsap")) return "gsap";
           if (id.includes("react-router")) return "router";
           if (id.includes("lucide-react")) return "icons";
         },

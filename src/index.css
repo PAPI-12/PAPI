@@ -122,6 +122,125 @@
   transform: translateZ(0);
 }
 
+/* --- Ambient floaters ---
+   Compositor-only keyframes. Previously fifteen framer-motion loops ticked on
+   the main thread every frame; these run off-thread and cost nothing. */
+@keyframes float-cross {
+  0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
+  25%  { transform: translate3d(0, -12px, 0) rotate(14deg) scale(1.08); }
+  50%  { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
+  75%  { transform: translate3d(0, 10px, 0) rotate(-12deg) scale(1); }
+  100% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
+}
+@keyframes float-wave {
+  0%   { transform: translate3d(0, 0, 0); opacity: 0.45; }
+  25%  { transform: translate3d(14px, 0, 0); opacity: 0.9; }
+  50%  { transform: translate3d(0, 0, 0); opacity: 0.45; }
+  75%  { transform: translate3d(-10px, 0, 0); opacity: 0.7; }
+  100% { transform: translate3d(0, 0, 0); opacity: 0.45; }
+}
+.float-cross {
+  animation-name: float-cross;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+.float-wave {
+  animation-name: float-wave;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+/* --- Navbar --- */
+@keyframes nav-drop {
+  from { transform: translate3d(0, -100%, 0); }
+  to   { transform: none; }
+}
+.nav-drop { animation: nav-drop 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Mobile menu stays mounted and slides on the compositor. */
+.mobile-menu {
+  transform: translate3d(100%, 0, 0);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease, visibility 0s linear 0.42s;
+}
+.mobile-menu[data-open='true'] {
+  transform: none;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease, visibility 0s;
+}
+.mobile-menu-item {
+  opacity: 0;
+  transform: translate3d(20px, 0, 0);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+.mobile-menu[data-open='true'] .mobile-menu-item {
+  opacity: 1;
+  transform: none;
+}
+
+/* --- Scroll progress bar --- */
+.scroll-progress {
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+}
+
+/* --- Scroll reveal (see components/Reveal.tsx) --- */
+.reveal {
+  opacity: 0;
+  transition-property: opacity, transform;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+.reveal-up    { transform: translate3d(0, 30px, 0); }
+.reveal-left  { transform: translate3d(-4rem, 0, 0); }
+.reveal-right { transform: translate3d(4rem, 0, 0); }
+.reveal-scale { transform: scale(0.86); }
+.reveal[data-shown='true'] {
+  opacity: 1;
+  transform: none;
+  will-change: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+}
+
+/* --- Hero intro ---
+   Was framer-motion. The hero headline is the LCP element, so animating it
+   from JS meant the largest text on the page could not paint until React had
+   hydrated and the motion runtime had mounted. As CSS it paints with the very
+   first frame. */
+@keyframes hero-rise {
+  from { opacity: 0; transform: translate3d(0, 20px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes hero-pop {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes hero-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.hero-rise { animation: hero-rise 0.8s ease-out both; }
+.hero-pop { animation: hero-pop 0.9s ease-out both; }
+.hero-pop-late { animation-delay: 0.3s; }
+.hero-fade { animation: hero-fade 0.6s ease-out 0.15s both; }
+
+/* Idle handwriting sway, used by the studio signature / floating notes. */
+@keyframes sway {
+  0%   { transform: rotate(-5deg) translate3d(0, 0, 0); }
+  50%  { transform: rotate(-2.5deg) translate3d(0, -5px, 0); }
+  100% { transform: rotate(-5deg) translate3d(0, 0, 0); }
+}
+.sway {
+  animation: sway 6s ease-in-out infinite;
+  transform-origin: center;
+}
+
 
 /* Responsive size variables for stacked brand typography */
 :root {
@@ -143,6 +262,13 @@
 
 @media (prefers-reduced-motion: reduce) {
   .splitflap-tile[data-flipping="true"] { animation: none; }
+  .float-cross,
+  .float-wave,
+  .work-marquee-track,
+  .sway,
+  .hero-rise,
+  .hero-pop,
+  .hero-fade { animation: none !important; opacity: 1 !important; transform: none !important; }
 }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }

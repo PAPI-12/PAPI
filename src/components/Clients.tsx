@@ -1,6 +1,6 @@
 import React from 'react';
-import { motion } from 'framer-motion';
 import { ScribbleX, ScribbleUnderline, ScribbleWave } from './Scribbles';
+import Reveal from './Reveal';
 
 const brands = [
   { name: "NANDO'S", color: 'text-[#f5f3ee]', scale: 1.00 },
@@ -63,13 +63,12 @@ const Clients: React.FC = () => {
           editorial offset rhythm while mobile remains centered and safe. */}
       <div className="relative z-10 px-4 sm:px-6 lg:px-12 xl:px-24 max-w-[1600px] mx-auto flex flex-col items-stretch justify-center select-none overflow-visible">
         {brands.map((brand, i) => (
-          <motion.div
+          <Reveal
             key={brand.name}
-            initial={{ opacity: 0, x: i % 2 === 0 ? '-4rem' : '4rem' }}
-            whileInView={{ opacity: 1, x: 0 }}
-            viewport={{ once: true, margin: '-12%' }}
-            transition={{ duration: 1.15, delay: i * 0.1, ease: [0.16, 1, 0.3, 1] }}
-            className={`relative w-full max-w-full text-center leading-none`}
+            from={i % 2 === 0 ? 'left' : 'right'}
+            delay={i * 0.08}
+            duration={1.1}
+            className="relative w-full max-w-full text-center leading-none"
           >
             <h3
               className={`brand-name font-display ${brand.color} block max-w-full leading-[0.82] tracking-tight whitespace-nowrap`}
@@ -77,37 +76,44 @@ const Clients: React.FC = () => {
             >
               {brand.name}
             </h3>
-          </motion.div>
+          </Reveal>
         ))}
 
         {/* Handwritten signature has its own contextual wrapper instead of a
             fragile page-percentage position, so resizing cannot collide it with
             the neighbouring names. */}
         <div className="relative mt-3 md:mt-1 lg:-mt-5 mb-3 md:mb-1 lg:mb-0 flex justify-center py-2 md:py-4">
-          <motion.span
-            className="hand-note relative block max-w-full text-center text-[#f5f3ee] text-[clamp(1.4rem,5.2vw,4.4rem)] rotate-[-5deg] whitespace-nowrap pointer-events-none z-30"
-            style={{ textShadow: '0 10px 30px rgba(0,0,0,.65)' }}
-            initial={{ opacity: 0, scale: 0.86 }}
-            whileInView={{ opacity: 1, scale: 1 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.9, delay: 0.7, ease: [0.16, 1, 0.3, 1] }}
-            animate={{
-              rotate: [-5, -2, -5],
-              y: [0, -5, 0],
-            }}
+          {/*
+            `animate` and `whileInView` on one element fight each other: the
+            looping animate prop won, so the reveal never played and the
+            signature popped in at full opacity. The reveal stays in React; the
+            idle sway is a CSS keyframe on an inner span, so they compose
+            instead of overwriting one another.
+          */}
+          <Reveal
+            as="span"
+            from="scale"
+            delay={0.35}
+            duration={0.9}
+            className="relative block max-w-full z-30 pointer-events-none"
           >
-            Papi Raborife Studio
-          </motion.span>
+            <span
+              className="sway hand-note block text-center text-[#f5f3ee] text-[clamp(1.4rem,5.2vw,4.4rem)] whitespace-nowrap"
+              style={{ textShadow: '0 10px 30px rgba(0,0,0,.65)' }}
+            >
+              Papi Raborife Studio
+            </span>
+          </Reveal>
         </div>
       </div>
 
-      <motion.span
-        className="absolute top-[23%] left-1/2 -translate-x-1/2 z-20 text-[#d7ff4f] text-base md:text-2xl rotate-[-5deg] whitespace-nowrap pointer-events-none"
-        animate={{ rotate: [-5, -3, -5], y: [0, -5, 0] }}
-        transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
-      >
-        culture led creative
-      </motion.span>
+      {/* Was missing `hand-note`, so it rendered in Inter while its twin in the
+          hero rendered in Caveat. Sway is now a compositor-only keyframe. */}
+      <span className="absolute top-[23%] left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+        <span className="sway hand-note block text-[#d7ff4f] text-base md:text-2xl whitespace-nowrap">
+          culture led creative
+        </span>
+      </span>
       <span className="absolute bottom-[11%] left-1/2 -translate-x-1/2 z-20 hand-note text-[#d7ff4f] text-base md:text-2xl rotate-[-6deg] whitespace-nowrap pointer-events-none hidden sm:block">
         we build ideas into cultural signals
       </span>

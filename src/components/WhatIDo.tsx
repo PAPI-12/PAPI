@@ -25,9 +25,18 @@ const smoothstep = (t: number) => {
   return x * x * (3 - 2 * x);
 };
 
+/**
+ * Scroll-scrubbed "what I do" stack.
+ *
+ * This used to be a GSAP ScrollTrigger pin. That cost ~114kB of JS, injected
+ * pin-spacing into the document at runtime (which made the page jump the first
+ * time you scrolled near it) and needed constant refresh() calls to survive
+ * font loads and resizes. It is now a plain `position: sticky` stage inside a
+ * tall spacer — the browser does the pinning natively, so there is nothing to
+ * measure, nothing to refresh and nothing to jump.
+ */
 const WhatIDo: React.FC = () => {
   const rootRef = useRef<HTMLDivElement>(null);
-  const stageRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Array<HTMLHeadingElement | null>>([]);
   const noteRefs = useRef<Array<HTMLParagraphElement | null>>([]);
   const dotRefs = useRef<Array<HTMLSpanElement | null>>([]);
@@ -37,15 +46,20 @@ const WhatIDo: React.FC = () => {
 
   useEffect(() => {
     const root = rootRef.current;
-    const stage = stageRef.current;
-    if (!root || !stage) return;
+    if (!root) return;
 
     const items = itemRefs.current;
     const notes = noteRefs.current;
     const dots = dotRefs.current;
+    const n = SKILLS.length;
 
+    let lastPainted = -1;
     const paint = (raw: number) => {
-      const n = SKILLS.length;
+      // Sub-pixel changes are invisible; skipping them keeps style writes (and
+      // therefore recalcs) off most frames.
+      if (Math.abs(raw - lastPainted) < 0.002) return;
+      lastPainted = raw;
+
       const idx = Math.round(Math.min(n - 1, Math.max(0, raw)));
       if (idx !== activeIndex.current) {
         activeIndex.current = idx;
@@ -84,14 +98,14 @@ const WhatIDo: React.FC = () => {
 
       if (cueRef.current) {
         const end = smoothstep((raw - (n - 1.25)) / 0.4);
-        cueRef.current.textContent =
-          end > 0.55 ? 'continue into selected work' : 'scroll to move through the practice';
+        const text = end > 0.55 ? 'continue into selected work' : 'scroll to move through the practice';
+        if (cueRef.current.textContent !== text) cueRef.current.textContent = text;
       }
     };
 
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduceMotion) {
-      paint(0);
+    paint(0);
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       notes.forEach((el) => {
         if (!el) return;
         el.style.opacity = '1';
@@ -100,85 +114,52 @@ const WhatIDo: React.FC = () => {
       return;
     }
 
-    paint(0);
+    let ticking = false;
+    let visible = true;
 
-    // GSAP + ScrollTrigger are ~45kB gzipped and are only needed once this
-    // section is actually approaching the viewport. Loading them lazily keeps
-    // them off the initial critical path, so the hero paints without waiting.
-    let cancelled = false;
-    let cleanupAnimation: (() => void) | null = null;
-
-    const boot = async () => {
-      const [{ default: gsap }, { ScrollTrigger }] = await Promise.all([
-        import('gsap'),
-        import('gsap/ScrollTrigger'),
-      ]);
-      if (cancelled) return;
-
-      gsap.registerPlugin(ScrollTrigger);
-
-      const ctx = gsap.context(() => {
-        ScrollTrigger.create({
-          trigger: root,
-          start: 'top top',
-          end: '+=320%',
-          pin: true,
-          pinSpacing: true,
-          scrub: 0.7,
-          anticipatePin: 1,
-          invalidateOnRefresh: true,
-          onUpdate: (self) => {
-            const n = SKILLS.length;
-            const p = self.progress;
-            const hold = 0.08;
-            const t = clamp01((p - hold) / (1 - hold * 2));
-            paint(t * (n - 1));
-          },
-        });
-      }, root);
-
-      // Pinning measures layout; fonts landing later shift it. Re-measure once.
-      const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
-      fonts?.ready.then(() => { if (!cancelled) ScrollTrigger.refresh(); }).catch(() => {});
-
-      let resizeTimer = 0;
-      const onResize = () => {
-        window.clearTimeout(resizeTimer);
-        resizeTimer = window.setTimeout(() => ScrollTrigger.refresh(), 180);
-      };
-      window.addEventListener('resize', onResize, { passive: true });
-
-      cleanupAnimation = () => {
-        window.clearTimeout(resizeTimer);
-        window.removeEventListener('resize', onResize);
-        ctx.revert();
-      };
+    const read = () => {
+      ticking = false;
+      const rect = root.getBoundingClientRect();
+      const travel = rect.height - window.innerHeight;
+      if (travel <= 0) return;
+      // 0 while the stage is arriving, 1 once it has been fully scrolled past.
+      const p = clamp01(-rect.top / travel);
+      // Small hold at each end so the first and last skill get a beat.
+      const hold = 0.08;
+      const t = clamp01((p - hold) / (1 - hold * 2));
+      paint(t * (n - 1));
     };
 
-    // Only pay for it when the section is within a screen of the viewport.
+    const onScroll = () => {
+      if (ticking || !visible) return;
+      ticking = true;
+      requestAnimationFrame(read);
+    };
+
     const io = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          io.disconnect();
-          boot();
-        }
+      ([entry]) => {
+        visible = !!entry?.isIntersecting;
+        if (visible) onScroll();
       },
-      { rootMargin: '100% 0px' },
+      { rootMargin: '10% 0px' },
     );
     io.observe(root);
 
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    read();
+
     return () => {
-      cancelled = true;
       io.disconnect();
-      cleanupAnimation?.();
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
     };
   }, []);
 
   return (
-    <div ref={rootRef} className="relative z-10 overflow-hidden bg-[#171715]">
+    <div ref={rootRef} className="relative z-10 h-[340svh] bg-[#171715]">
       <div
-        ref={stageRef}
-        className="relative h-[100svh] min-h-[520px] flex flex-col justify-center px-4 sm:px-6 lg:px-12 xl:px-24"
+        className="sticky top-0 h-[100svh] min-h-[520px] overflow-hidden flex flex-col justify-center px-4 sm:px-6 lg:px-12 xl:px-24 bg-[#171715]"
         style={{
           boxShadow: '0 -40px 80px rgba(0,0,0,0.45)',
           borderTop: '1px solid rgba(245,243,238,0.08)',

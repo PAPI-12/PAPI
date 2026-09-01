@@ -1,6 +1,5 @@
-import React, { lazy, Suspense, useEffect } from 'react';
+import React, { lazy, Suspense, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation, Link } from 'react-router-dom';
-import { motion, useScroll, useSpring } from 'framer-motion';
 import { MouseProvider } from './context/MouseContext';
 import Navbar from './components/Navbar';
 import CustomCursor from './components/CustomCursor';
@@ -32,12 +31,47 @@ const PageFallback = () => (
   <div className="min-h-screen bg-[#171715]" aria-hidden />
 );
 
+/**
+ * Scroll progress bar.
+ *
+ * Was framer-motion's useScroll + useSpring. That pulled the whole motion
+ * runtime onto the initial route just to scale one div. It is now a passive,
+ * rAF-throttled scroll listener writing a single transform.
+ */
+const ScrollProgress: React.FC = () => {
+  const barRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let ticking = false;
+    const write = () => {
+      ticking = false;
+      const bar = barRef.current;
+      if (!bar) return;
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      const p = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+      bar.style.transform = `scaleX(${p})`;
+    };
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(write);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    write();
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, []);
+
+  return <div ref={barRef} className="scroll-progress fixed top-0 left-0 right-0 h-1 bg-accent z-50" aria-hidden />;
+};
+
 const AppContent: React.FC = () => {
-  const { scrollYProgress } = useScroll();
-  const scaleX = useSpring(scrollYProgress, { stiffness: 100, damping: 30, restDelta: 0.001 });
   return (
     <div className="relative min-h-screen bg-[#171715] mix-grain">
-      <motion.div className="fixed top-0 left-0 right-0 h-1 bg-accent z-50 origin-left" style={{ scaleX }} />
+      <ScrollProgress />
       <CustomCursor />
       <Navbar />
       <main className="relative z-10">

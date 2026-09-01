@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { motion, useMotionValue, useSpring } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { ScribbleX, ScribbleUnderline, FloatingCross, FloatingWave } from './Scribbles';
 import SplitFlapText from './SplitFlapText';
@@ -26,10 +25,6 @@ const Hero: React.FC = () => {
   const [introComplete, setIntroComplete] = useState(false);
   const [physicsEnabled, setPhysicsEnabled] = useState(false);
 
-  const targetX = useMotionValue(0);
-  const targetY = useMotionValue(0);
-  const springX = useSpring(targetX, { stiffness: 260, damping: 28, mass: 0.6 });
-  const springY = useSpring(targetY, { stiffness: 260, damping: 28, mass: 0.6 });
 
   const handleIntroComplete = useCallback(() => {
     setIntroComplete(true);
@@ -50,9 +45,34 @@ const Hero: React.FC = () => {
     return () => window.clearTimeout(t);
   }, []);
 
+  // The trailing note used to be two framer-motion springs. It is now a tiny
+  // hand-rolled critically-damped spring driven by the same rAF loop that
+  // writes the transform, so the hero no longer needs the motion runtime at
+  // all — and the note is written once per frame instead of per mouse event.
   useEffect(() => {
     const hero = heroRef.current;
     if (!hero) return;
+
+    const note = cursorNoteRef.current;
+    let targetX = 0;
+    let targetY = 0;
+    let curX = 0;
+    let curY = 0;
+    let velX = 0;
+    let velY = 0;
+    let primed = false;
+    let raf = 0;
+
+    const setTarget = (x: number, y: number) => {
+      targetX = x;
+      targetY = y;
+      if (!primed) {
+        primed = true;
+        curX = x;
+        curY = y;
+        if (note) note.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+      }
+    };
 
     let noteWidth = cursorNoteRef.current?.offsetWidth || 180;
     let noteHeight = cursorNoteRef.current?.offsetHeight || 32;
@@ -73,8 +93,7 @@ const Hero: React.FC = () => {
     };
 
     const centre = () => {
-      targetX.set((boxWidth - noteWidth) / 2);
-      targetY.set((boxHeight - noteHeight) / 2);
+      setTarget((boxWidth - noteWidth) / 2, (boxHeight - noteHeight) / 2);
     };
 
     const measure = () => {
@@ -120,21 +139,79 @@ const Hero: React.FC = () => {
       }
       inside = true;
 
-      targetX.set(Math.max(padding, Math.min(localX + 16, boxWidth - noteWidth - padding)));
-      targetY.set(Math.max(padding, Math.min(localY + 16, boxHeight - noteHeight - padding)));
+      setTarget(
+        Math.max(padding, Math.min(localX + 16, boxWidth - noteWidth - padding)),
+        Math.max(padding, Math.min(localY + 16, boxHeight - noteHeight - padding)),
+      );
     };
 
     // Listening on window (not the section) means leaving the hero in any
     // direction re-centres the note instead of leaving it stuck at the edge.
     window.addEventListener('pointermove', handlePointerMove, { passive: true });
 
+    // Spring integration. Stops itself once settled and wakes on the next
+    // pointer move, so an idle hero costs zero frames.
+    const STIFF = 260;
+    const DAMP = 28;
+    const MASS = 0.6;
+    let lastT = 0;
+    let idleFrames = 0;
+
+    const tick = (now: number) => {
+      const dt = lastT ? Math.min((now - lastT) / 1000, 0.032) : 1 / 60;
+      lastT = now;
+
+      const ax = (-STIFF * (curX - targetX) - DAMP * velX) / MASS;
+      const ay = (-STIFF * (curY - targetY) - DAMP * velY) / MASS;
+      velX += ax * dt;
+      velY += ay * dt;
+      curX += velX * dt;
+      curY += velY * dt;
+
+      const still =
+        Math.abs(curX - targetX) < 0.05 &&
+        Math.abs(curY - targetY) < 0.05 &&
+        Math.abs(velX) < 0.5 &&
+        Math.abs(velY) < 0.5;
+
+      if (still) {
+        curX = targetX;
+        curY = targetY;
+        velX = 0;
+        velY = 0;
+        idleFrames++;
+      } else {
+        idleFrames = 0;
+      }
+
+      if (note) note.style.transform = `translate3d(${curX}px, ${curY}px, 0)`;
+      // Keep a short tail of frames so a resettle is instant, then sleep.
+      if (idleFrames > 8) {
+        raf = 0;
+        lastT = 0;
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+
+    const wake = () => {
+      if (!raf) {
+        lastT = 0;
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    window.addEventListener('pointermove', wake, { passive: true });
+    wake();
+
     return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener('pointermove', wake);
       window.clearTimeout(resizeTimer);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('scroll', syncBox);
       window.removeEventListener('pointermove', handlePointerMove);
     };
-  }, [targetX, targetY]);
+  }, []);
 
 
   return (
@@ -181,31 +258,20 @@ const Hero: React.FC = () => {
 
       <div className="relative z-10 text-center px-4 w-full max-w-[96vw]">
         <h1 className="sr-only">CRAFTING AWESOMENESS SINCE 2015</h1>
-        <motion.p
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
-          className="text-[10px] sm:text-xs md:text-sm font-bold tracking-[0.35em] uppercase mb-6 md:mb-8 text-[#9a9a93]"
-        >
+        <p className="hero-rise text-[10px] sm:text-xs md:text-sm font-bold tracking-[0.35em] uppercase mb-6 md:mb-8 text-[#9a9a93]">
           Papi Raborife
-        </motion.p>
+        </p>
 
         <div className="relative flex flex-col items-center justify-center w-full">
-          <motion.h1
+          <h1
             aria-hidden="true"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.9, ease: 'easeOut' }}
-            className="font-display text-[#f5f3ee] text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] whitespace-nowrap"
+            className="hero-pop font-display text-[#f5f3ee] text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] whitespace-nowrap"
           >
             <HeroLetters text="CRAFTING" />
-          </motion.h1>
+          </h1>
 
-          <motion.h1
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.6, delay: 0.15 }}
-            className="font-display text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] max-w-full whitespace-nowrap"
+          <h1
+            className="hero-fade font-display text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] max-w-full whitespace-nowrap"
             aria-hidden="true"
           >
             <SplitFlapText
@@ -215,33 +281,27 @@ const Hero: React.FC = () => {
               interval={70}
               onComplete={handleIntroComplete}
             />
-          </motion.h1>
+          </h1>
 
-          <motion.h1
+          <h1
             aria-hidden="true"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.9, ease: 'easeOut', delay: 0.3 }}
-            className="font-display text-stroke text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] whitespace-nowrap"
+            className="hero-pop hero-pop-late font-display text-stroke text-[clamp(2.2rem,10.8vw,10rem)] md:text-[clamp(3.5rem,8.6vw,9.5rem)] leading-[0.86] tracking-[-0.04em] whitespace-nowrap"
           >
             <HeroLetters text="SINCE 2015" />
-          </motion.h1>
+          </h1>
         </div>
       </div>
 
       {/* "culture led creative" — absolutely positioned inside the hero,
           centred at rest, clamped to the hero rectangle so it can never
           escape the section border. */}
-      <motion.div
+      <div
         ref={cursorNoteRef}
         className="absolute top-0 left-0 z-30 pointer-events-none hand-note text-[#d7ff4f] text-base sm:text-lg md:text-2xl font-bold whitespace-nowrap mix-blend-difference"
-        style={{ x: springX, y: springY }}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: isMeasured ? 1 : 0 }}
-        transition={{ opacity: { duration: 0.3 } }}
+        style={{ opacity: isMeasured ? 1 : 0, transition: 'opacity 300ms ease', willChange: 'transform' }}
       >
         culture led creative
-      </motion.div>
+      </div>
 
       <div className="absolute left-4 sm:left-6 bottom-10 md:bottom-12 hidden md:flex flex-col gap-4 text-[10px] md:text-xs font-bold text-[#8f8f88] z-30">
         <Link to="/resume" className="hover:text-[#f5f3ee] transform -rotate-90 tracking-[0.2em]">
