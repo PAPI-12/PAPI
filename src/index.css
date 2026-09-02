@@ -64,12 +64,18 @@
 @media (max-width: 768px) { .text-stroke { -webkit-text-stroke: 1px rgba(245, 243, 238, 0.4); } }
 
 .mix-grain { position: relative; }
+
+/* Grain film — a FIXED full-viewport layer, not a per-section one.
+   A section-absolute film (the old behaviour) made each section's own grain
+   slide into view, which read as the whole site "jittering" while scrolling.
+   One viewport-locked layer keeps the film still and continuous. */
 .mix-grain::before {
   content: '';
-  position: absolute;
+  position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 1;
+  z-index: 40;
+  transform: translateZ(0);
   opacity: 0.035;
   mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -134,14 +140,17 @@
 
 /* Matrix hand-off guide: the caret at the foot of the What I Do stage that
    points the visitor down into Featured Work once the machine hands over. */
-@keyframes matrix-guide-drop {
-  0%, 100% { transform: translateY(0); opacity: 1; }
-  50%      { transform: translateY(5px); opacity: 0.45; }
-}
 .matrix-guide-caret {
-  animation: matrix-guide-drop 1.1s ease-in-out infinite;
-  text-shadow: 0 0 12px rgba(74, 222, 128, 0.8);
+  animation: matrix-guide-caret 1.4s cubic-bezier(0.45, 0, 0.2, 1) infinite;
 }
+
+@keyframes matrix-guide-caret {
+  0% { opacity: 0; transform: translateY(-6px); }
+  45% { opacity: 1; transform: translateY(0); }
+  75% { opacity: 0.9; transform: translateY(2px); }
+  100% { opacity: 0; transform: translateY(8px); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .matrix-guide-caret { animation: none; }
 }

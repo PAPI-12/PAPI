@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
+import { resetMachineAct } from './WhatIDo';
 
 const Navbar: React.FC = () => {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -79,7 +80,9 @@ const Navbar: React.FC = () => {
     <>
       <nav id="main-nav" className={`nav-drop fixed top-0 left-0 w-full z-[50] transition-all duration-300 ${isScrolled ? 'bg-[#171715]/95 backdrop-blur-md py-4' : 'bg-transparent py-6 md:py-8'}`}>
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-12 flex justify-between items-center">
-          <Link to="/" onClick={goToHero} className="flex items-center gap-3 group" aria-label="Papi Raborife — back to top">
+          {/* Clicking the brand also re-arms the What I Do machine act — it is
+              the explicit "play it again" affordance besides a page reload. */}
+          <Link to="/" onClick={(e) => { resetMachineAct(); goToHero(e); }} className="flex items-center gap-3 group" aria-label="Papi Raborife — back to top">
             <svg width="40" height="40" viewBox="0 0 40 40" fill="none" className="transition-transform group-hover:rotate-12">
               <rect x="2" y="2" width="36" height="36" rx="18" stroke="#D7FF4F" strokeWidth="1.5" />
               <path d="M20 8L25 18H15L20 8Z" fill="#F5F3EE" />
