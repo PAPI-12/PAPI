@@ -25,6 +25,13 @@ const RING_STROKE = -1;
  * this module and the overlay returns.
  */
 let overlaySpent = false;
+/**
+ * Consuming the overlay is deferred by a tick. React's StrictMode mounts,
+ * unmounts and re-mounts every effect in development — without this, that
+ * synthetic unmount ate the overlay before the visitor ever saw it, and the
+ * hero looked broken in dev while being fine in production.
+ */
+let overlaySpendTimer = 0;
 
 const HeroLetters: React.FC<{ text: string }> = ({ text }) => (
   <>
@@ -93,6 +100,9 @@ const Hero: React.FC = () => {
     const canvas = eraserRef.current;
     if (!hero || !ring || !canvas) return;
 
+    // A re-mount inside the same tick (StrictMode) cancels the pending spend.
+    if (overlaySpendTimer) { clearTimeout(overlaySpendTimer); overlaySpendTimer = 0; }
+
     let boxLeft = 0;
     let boxTop = 0;
     let boxW = 0;
@@ -157,6 +167,10 @@ const Hero: React.FC = () => {
       const svg = ring.querySelector('svg');
       const path = ring.querySelector('path');
       const text = ring.querySelector('text');
+      // textLength is honoured on <textPath> by some engines and on <text> by
+      // others — write it to both so the label is circumference-pinned (and
+      // therefore seamless) in every browser.
+      const textPath = ring.querySelector('textPath');
       if (svg) svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
       if (path) {
         // Text baseline sits just inside the ring edge.
@@ -172,9 +186,14 @@ const Hero: React.FC = () => {
           // letter gaps ONLY, so glyphs keep their true shapes (no stretch) and
           // the loop never cuts a word.
           const px = Math.max(12, Math.min(22, radius * 0.4));
+          const circumference = (2 * Math.PI * pr).toFixed(1);
           text.setAttribute('font-size', String(px));
-          text.setAttribute('textLength', (2 * Math.PI * pr).toFixed(1));
+          text.setAttribute('textLength', circumference);
           text.setAttribute('lengthAdjust', 'spacing');
+          if (textPath) {
+            textPath.setAttribute('textLength', circumference);
+            textPath.setAttribute('lengthAdjust', 'spacing');
+          }
         }
       }
     };
@@ -186,10 +205,11 @@ const Hero: React.FC = () => {
     const paintOverlay = () => {
       syncBox();
       if (boxW < 8 || boxH < 8) return;
-      // The overlay is a soft, graded blur of the image underneath — retina
-      // resolution here only costs fill-rate on every erase stroke (the hero
-      // mouse-move lag), so the buffer stays at CSS pixel density.
-      dpr = 1;
+      // The overlay is visible across the entire first impression, so it must
+      // retain the photograph's detail on Retina displays. The erase path no
+      // longer uses costly per-stroke canvas filters, making a 2x cap a safe
+      // quality/performance balance instead of the visibly soft 1x buffer.
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
       canvas.width = Math.floor(boxW * dpr);
       canvas.height = Math.floor(boxH * dpr);
       canvas.style.width = `${boxW}px`;
@@ -219,11 +239,13 @@ const Hero: React.FC = () => {
         const dw = src.naturalWidth * scale;
         const dh = src.naturalHeight * scale;
         let posX = 50;
-        let posY = 0;
+        let posY = 50;
         const pos = getComputedStyle(src).objectPosition.trim().split(/\s+/);
         if (pos.length === 2) {
-          posX = parseFloat(pos[0]);
-          posY = parseFloat(pos[1]);
+          const parsedX = parseFloat(pos[0]);
+          const parsedY = parseFloat(pos[1]);
+          if (Number.isFinite(parsedX)) posX = parsedX;
+          if (Number.isFinite(parsedY)) posY = parsedY;
         }
         ctx.drawImage(src, (boxW - dw) * (posX / 100), (boxH - dh) * (posY / 100), dw, dh);
         ctx.filter = 'none';
@@ -408,7 +430,7 @@ const Hero: React.FC = () => {
         // Gentle continuous rotation of the label. Rotating the group (one
         // transform) instead of shifting text along the path keeps every frame
         // free of SVG text re-layout — the big lag source while sweeping.
-        // The doubled label is circumference-pinned, so the loop is seamless.
+        // The circumference-pinned label makes the loop seamless.
         spin = (spin + dt * 14) % 360;
         ringSpinRef.current?.setAttribute(
           'transform',
@@ -419,8 +441,11 @@ const Hero: React.FC = () => {
     raf = requestAnimationFrame(frame);
 
     return () => {
-      // Leaving the hero (route change or unmount) consumes the overlay.
-      overlaySpent = true;
+      // Leaving the hero (route change or unmount) consumes the overlay —
+      // unless we are straight back in a moment, which is a StrictMode
+      // remount rather than the visitor actually leaving.
+      if (overlaySpendTimer) clearTimeout(overlaySpendTimer);
+      overlaySpendTimer = window.setTimeout(() => { overlaySpent = true; }, 80);
       cancelAnimationFrame(raf);
       io.disconnect();
       bodyTrailRef.current = null;
@@ -441,20 +466,25 @@ const Hero: React.FC = () => {
       className="relative h-[100svh] min-h-[540px] flex items-center justify-center overflow-hidden bg-[#171715]"
     >
       <div className="absolute inset-0 z-0">
-        {/* Full-colour source image. The canvas above it holds the darkening
-            overlay that the ring erases. Desktop (wide aspect) gets the
-            outpainted 16:9 landscape variant so the portrait is never
-            zoomed/cropped into on laptops; phones keep the original. */}
-        <picture>
+        {/* Full-colour source image. Wide screens receive a seamless 16:9,
+            high-density outpaint so the complete portrait can fill the hero
+            without the old side blocks. The picture itself must own the hero
+            bounds; otherwise percentage sizing on its child can collapse. */}
+        <picture className="absolute inset-0 block h-full w-full">
           <source
             srcSet="/images/hero-landscape.webp"
             media="(min-width: 1024px) and (min-aspect-ratio: 5/4)"
+            type="image/webp"
+            width="3200"
+            height="1800"
           />
           <img
             ref={overlayImgRef}
             src="/images/Hero image.webp"
             alt="Papi Raborife"
-            className="w-full h-full object-cover object-top lg:object-[50%_38%]"
+            className="absolute inset-0 h-full w-full object-cover object-center"
+            width="2778"
+            height="2264"
             fetchPriority="high"
             decoding="async"
             onError={(e) => { e.currentTarget.style.display = 'none'; }}

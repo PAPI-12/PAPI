@@ -1,4 +1,5 @@
-import React, { useLayoutEffect, useRef } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 const SKILLS = [
   { title: 'UX/UI DESIGN', note: 'interfaces with instinct', color: '#f5f3ee' },
@@ -54,6 +55,9 @@ const rand = (i: number) => {
                   lines). Scrolling is held until the transmission is over,
                   then the surge rains down, "continue" lights, and the pin
                   hands off to Featured Work.
+     0.86 → 1.00  the code SPILLS out of the section: a viewport-fixed layer
+                  of light drops carries the rain over Featured Work and only
+                  rains itself out once the visitor keeps scrolling down.
    ABOUT — never blank:
      0.00 → 0.78  the same continuous glide; AI CREATIVE sails off in its
                   original white like every other skill
@@ -66,6 +70,9 @@ const T_CODE_END = 0.72;
 const T_VANISH_END = 0.8;
 const T_CUE_FADE_START = 0.42;
 const T_CUE_FADE_END = 0.56;
+
+/** Where the spill layer starts bleeding past the section edge. */
+const T_SPILL_START = 0.86;
 
 /** Total scroll length of the pinned sequences, in screen heights. */
 const SCREENS_HOME = 8.2;
@@ -112,7 +119,8 @@ const buildLineSchedule = (line: string, startAt: number) => {
 const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' }) => {
   /**
    * home  — skills glide → ART COMES 1ST encodes → machine wakes (auto-played,
-   *         scroll-locked) → surge hands off to Featured Work.
+   *         scroll-held) → surge hands off to Featured Work, and the code
+   *         spills over the boundary into it.
    * about — the practice only: the same glide, AI CREATIVE exits in white,
    *         then "continue" lights and Experience is pulled up. No machine.
    */
@@ -120,6 +128,7 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
   const rootRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const rainRef = useRef<HTMLCanvasElement>(null);
+  const spillRef = useRef<HTMLCanvasElement>(null);
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
   const titleRefs = useRef<Array<HTMLHeadingElement | null>>([]);
   const noteRefs = useRef<Array<HTMLParagraphElement | null>>([]);
@@ -133,6 +142,19 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
   const bootTagRef = useRef<HTMLParagraphElement>(null);
   const lineRefs = useRef<Array<HTMLParagraphElement | null>>([]);
   const guideRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * The spill layer is a portal so it can sit ABOVE the following section:
+   * anything rendered inside this component is trapped in the page's own
+   * stacking order and would be painted over by Featured Work's opaque
+   * background. Decided once, at mount, so the ref exists for the layout
+   * effect on the very first commit.
+   */
+  const [spillOn] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  );
 
   // Variant-resolved choreography values, captured by the effects below.
   const SCREENS = machineMode ? SCREENS_HOME : SCREENS_ABOUT;
@@ -155,6 +177,8 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
     let rainAlpha = 0;
     /** 0 = normal fall, 1 = Reloaded surge on the way out. */
     let rainBoost = 0;
+    /** 0 = no spill, 1 = full spill over the following section. */
+    let spillAlpha = 0;
 
     /**
      * The pin's height is measured and written in pixels. Pure-CSS svh
@@ -181,7 +205,9 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
       });
     })();
     const SPEAK_END = lineSchedules[lineSchedules.length - 1].end;
-    const ACT_DONE = SPEAK_END + 2.3;
+    // Hold ends shortly after the last character: the surge itself is then
+    // scroll-driven, so the visitor is never held for the whole outro.
+    const ACT_DONE = SPEAK_END + 1.4;
 
     let actStart = -1; // ms timestamp; -1 = idle
     let lockY = 0;
@@ -218,22 +244,38 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
       }
     };
 
+    /** Keyboard is never trapped: any paging key ends the hold immediately. */
+    const holdKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (
+        ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' ', 'Escape', 'Tab'].includes(
+          e.key,
+        )
+      ) {
+        machineActSpent = true;
+        disarmLock();
+      }
+    };
+
     const armLock = () => {
       if (lockArmed || !canHold()) return;
       lockArmed = true;
       lockY = window.scrollY;
+      breakoutDelta = 0;
       window.addEventListener('scroll', holdScroll, { passive: true });
       window.addEventListener('wheel', holdScroll, { passive: false });
       window.addEventListener('touchmove', holdScroll, { passive: false });
+      window.addEventListener('keydown', holdKey);
     };
 
-    const disarmLock = () => {
+    function disarmLock() {
       if (!lockArmed) return;
       lockArmed = false;
       window.removeEventListener('scroll', holdScroll);
       window.removeEventListener('wheel', holdScroll);
       window.removeEventListener('touchmove', holdScroll);
-    };
+      window.removeEventListener('keydown', holdKey);
+    }
 
     /** Full reset — called when the section leaves the viewport either way. */
     const resetAct = () => {
@@ -249,8 +291,10 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
       // Continuous front: the stack NEVER pauses. Home glides through the 5
       // skills and raises the motto (index N) which parks at the front;
       // About glides through the skills and lets AI CREATIVE sail off.
-      const glideEnd = machineMode ? T_SKILLS_END : 0.78;
-      const glideSpan = machineMode ? N + 0.15 : N;
+      // About runs a hair past the last card so AI CREATIVE finishes its exit
+      // instead of freezing half-faded for the rest of the pin.
+      const glideEnd = machineMode ? T_SKILLS_END : 0.86;
+      const glideSpan = machineMode ? N + 0.15 : N + 0.6;
       const front = clamp01(p / glideEnd) * glideSpan;
 
       const codeT =
@@ -282,9 +326,11 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
       const speakT = actT > T_BOOT + 0.35 ? 1 : 0; // arm flag; lines use their schedules
       const releaseT = actT > SPEAK_END ? smoothstep((actT - SPEAK_END) / 0.9) : 0;
       const surgeT = actT > SPEAK_END - 0.5 ? smoothstep((actT - (SPEAK_END - 0.5)) / 2.0) : 0;
-      if (machineMode && actStart > 0 && actT > ACT_DONE && lockArmed) {
-        // Transmission complete: release the hold and remember — the machine
+      if (machineMode && actStart > 0 && actT > ACT_DONE) {
+        // Transmission complete: release any hold and remember — the machine
         // plays once per visit, then the section belongs to scroll again.
+        // (Touch devices are never held, so this is also where THEY mark the
+        // act as spent; otherwise it replayed on every pass.)
         machineActSpent = true;
         disarmLock();
       }
@@ -449,7 +495,7 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
       const term = termRef.current;
       if (term) {
         const live = actT > 0 && acting;
-        term.style.visibility = live || (machineMode && actT > ACT_DONE && actT <= ACT_DONE + 0.5) ? 'visible' : 'hidden';
+        term.style.visibility = live ? 'visible' : 'hidden';
         term.style.opacity = actT > 0 ? (1 - releaseT).toFixed(3) : '0';
       }
 
@@ -511,7 +557,7 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
             else break;
           }
         }
-        if (count <= 0 && actT < times[0]) {
+        if (count <= 0) {
           el.style.visibility = 'hidden';
           el.dataset.txt = '';
           continue;
@@ -524,8 +570,7 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
           el.textContent = txt;
         }
         // Caret rides the line currently being written, then moves on.
-        const started = actT >= times[0];
-        el.dataset.caret = started && !full && releaseT < 1 ? 'true' : 'false';
+        el.dataset.caret = !full && releaseT < 1 ? 'true' : 'false';
       }
 
       // The way out: a scanline at the foot of the stage, pointing down.
@@ -544,7 +589,8 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
 
     const canvas = rainRef.current;
     const rctx = canvas?.getContext('2d') ?? null;
-    let columns: { x: number; y: number; speed: number; len: number; seed: number }[] = [];
+    type Col = { x: number; y: number; speed: number; len: number; seed: number };
+    let columns: Col[] = [];
     let cw = 0;
     let ch = 0;
     let dpr = 1;
@@ -579,6 +625,49 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
       }
     };
 
+    /* ── Spill rain: the code that runs OUT of the section ───────────
+       A viewport-fixed layer, portalled to <body> so it paints over the
+       following section instead of being buried under its background. It
+       lights up as the pin ends, keeps raining lightly across the top of
+       Featured Work, and rains itself out as the visitor keeps going down.
+       Deliberately sparse + slow: ambience, never a curtain over the work. */
+
+    const spill = spillRef.current;
+    const sctx = spill?.getContext('2d') ?? null;
+    let spillCols: Col[] = [];
+    let sw = 0;
+    let sh = 0;
+    let sdpr = 1;
+    const SPILL_FONT = 13;
+    const SPILL_ROW = 17;
+
+    const setupSpill = () => {
+      if (!spill || !sctx) return;
+      sw = window.innerWidth;
+      sh = window.innerHeight;
+      if (sw < 8 || sh < 8) return;
+      sdpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      spill.width = Math.floor(sw * sdpr);
+      spill.height = Math.floor(sh * sdpr);
+      spill.style.width = `${sw}px`;
+      spill.style.height = `${sh}px`;
+      sctx.setTransform(sdpr, 0, 0, sdpr, 0, 0);
+
+      // Far sparser than the section rain: these are drops, not a downpour.
+      const spacing = 76;
+      const count = Math.ceil(sw / spacing);
+      spillCols = [];
+      for (let i = 0; i < count; i++) {
+        spillCols.push({
+          x: Math.round(i * spacing + 10 + Math.random() * 26),
+          y: Math.random() * sh - sh * 0.5,
+          speed: 55 + Math.random() * 95,
+          len: 4 + Math.floor(Math.random() * 6),
+          seed: Math.floor(Math.random() * 1000),
+        });
+      }
+    };
+
     /* ── Frame loop ─────────────────────────────────────────────────── */
 
     let raf = 0;
@@ -587,14 +676,8 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
     let lastT = 0;
     let lastProgress = -1;
     let rainDrawn = false;
+    let spillDrawn = false;
     let rainTick = 0;
-
-    const readProgress = () => {
-      const rect = root.getBoundingClientRect();
-      const travel = rect.height - window.innerHeight;
-      if (travel <= 0) return 0;
-      return clamp01(-rect.top / travel);
-    };
 
     const frame = (now: number) => {
       if (!running) return;
@@ -604,21 +687,42 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
       const dt = lastT ? Math.min((now - lastT) / 1000, 0.05) : 1 / 60;
       lastT = now;
 
-      const p = readProgress();
-      // Repaint on scroll movement, and repaint continuously while the machine
-      // act is playing — it runs on its own clock, not on the scroll.
-      const actLive = machineMode && actStart > 0;
+      // One rect read per frame, shared by the progress, the stage-visibility
+      // test and the spill fade — layout is only ever measured once.
+      const rect = root.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const travel = rect.height - vh;
+      const p = travel > 0 ? clamp01(-rect.top / travel) : 0;
+      const stageVisible = rect.bottom > -1 && rect.top < vh + 1;
+
+      // Repaint on scroll movement, and repaint continuously ONLY while the
+      // machine act is actually playing — it runs on its own clock, not on the
+      // scroll. Once it has finished, a parked visitor costs nothing again.
+      const actLive =
+        machineMode && actStart > 0 && (now - actStart) / 1000 <= ACT_DONE + 0.8;
       if (Math.abs(p - lastProgress) > 0.0002 || actLive) {
         lastProgress = p;
         paint(p, now);
       }
 
+      // Spill: fades in with the hand-off, then rains out over ~1 screen of
+      // travel past the section. Scroll back up and it is gone with the pin.
+      if (machineMode && sctx) {
+        const past = vh - rect.bottom; // px travelled beyond the pin's end
+        const fadeIn = smoothstep((p - T_SPILL_START) / (1 - T_SPILL_START));
+        const fadeOut = 1 - smoothstep((past - vh * 0.1) / vh);
+        spillAlpha = fadeIn * clamp01(fadeOut);
+      } else {
+        spillAlpha = 0;
+      }
+
       // Rain — rendered on a half-cadence tick. Falling code is perceived as
       // continuous at ~30fps, and half the fillText work per second keeps the
       // pinned sequence smooth on modest hardware.
+      rainTick ^= 1;
+
       if (rctx) {
-        rainTick ^= 1;
-        if (rainAlpha > 0.01) {
+        if (rainAlpha > 0.01 && stageVisible) {
           rainDrawn = true;
           if (rainTick) {
             const speedMul = 1 + rainBoost * 1.35;
@@ -652,6 +756,42 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
           rainDrawn = false;
         }
       }
+
+      if (sctx && spill) {
+        if (spillAlpha > 0.01) {
+          spillDrawn = true;
+          if (rainTick) {
+            sctx.clearRect(0, 0, sw, sh);
+            sctx.font = `${SPILL_FONT}px "JetBrains Mono", ui-monospace, monospace`;
+            sctx.textBaseline = 'top';
+            for (let i = 0; i < spillCols.length; i++) {
+              const col = spillCols[i];
+              col.y += col.speed * dt * 2;
+              if (col.y - col.len * SPILL_ROW > sh) {
+                col.y = -Math.random() * sh * 0.6;
+                col.speed = 55 + Math.random() * 95;
+                col.len = 4 + Math.floor(Math.random() * 6);
+              }
+              for (let k = 0; k < col.len; k++) {
+                const y = col.y - k * SPILL_ROW;
+                if (y < -SPILL_ROW || y > sh) continue;
+                const fade = 1 - k / col.len;
+                sctx.globalAlpha = spillAlpha * fade * (k === 0 ? 0.75 : 0.34);
+                sctx.fillStyle = k === 0 ? '#f2ffd0' : '#d7ff4f';
+                sctx.fillText(
+                  glyphFor(col.seed + k + Math.floor(col.y / SPILL_ROW)),
+                  col.x,
+                  y,
+                );
+              }
+            }
+            sctx.globalAlpha = 1;
+          }
+        } else if (spillDrawn) {
+          sctx.clearRect(0, 0, sw, sh);
+          spillDrawn = false;
+        }
+      }
     };
 
     /* ── Wiring ─────────────────────────────────────────────────────── */
@@ -660,6 +800,7 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
 
     measure();
     setupRain();
+    setupSpill();
     paint(0, 0);
 
     if (reduce) {
@@ -719,6 +860,11 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
       return;
     }
 
+    /**
+     * The top margin is deliberately huge: the loop must stay alive for about
+     * a screen and a half AFTER the section has left, because that is exactly
+     * where the spill rain is still falling over Featured Work.
+     */
     const io = new IntersectionObserver(
       ([entry]) => {
         const wasOn = onScreen;
@@ -726,9 +872,12 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
         if (onScreen) { lastT = 0; measure(); setupRain(); lastProgress = -1; }
         // Leaving the section (up or down) resets the machine to the start:
         // come back and you see skills, not a spent terminal.
-        if (wasOn && !onScreen) resetAct();
+        if (wasOn && !onScreen) {
+          resetAct();
+          if (sctx) { sctx.clearRect(0, 0, sw, sh); spillDrawn = false; }
+        }
       },
-      { rootMargin: '15% 0px' },
+      { rootMargin: '160% 0px 15% 0px' },
     );
     io.observe(root);
 
@@ -738,6 +887,7 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
       resizeTimer = window.setTimeout(() => {
         measure();
         setupRain();
+        setupSpill();
         lastProgress = -1;
       }, 150);
     };
@@ -753,7 +903,7 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
       window.removeEventListener('resize', onResize);
       io.disconnect();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [machineMode, SCREENS]);
 
   return (
     // Tall spacer drives the pin; the stage inside is what stays on screen.
@@ -764,6 +914,28 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
       className="relative z-10 bg-[#171715]"
       style={{ height: machineMode ? '820vh' : '560vh' }}
     >
+      {/* The code that runs out of the section. Portalled to <body> so it can
+          keep falling ACROSS the next section instead of being clipped by the
+          page's stacking order. Below the navbar (z-50), above the content. */}
+      {machineMode && spillOn && typeof document !== 'undefined'
+        ? createPortal(
+            <canvas
+              ref={spillRef}
+              aria-hidden
+              className="pointer-events-none fixed inset-0 z-[30]"
+              style={{
+                // Heaviest at the top of the new section, thinning downward —
+                // it reads as rain arriving, not as a screen-wide filter.
+                maskImage:
+                  'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0) 100%)',
+                WebkitMaskImage:
+                  'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0) 100%)',
+              }}
+            />,
+            document.body,
+          )
+        : null}
+
       <div
         ref={stageRef}
         className="sticky top-0 overflow-hidden bg-[#171715]"
@@ -813,7 +985,7 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
                   style={{ color: skill.color }}
                 >
                   {Array.from(skill.title).map((ch, li) => (
-                    <span key={li}>{ch === ' ' ? ' ' : ch}</span>
+                    <span key={li}>{ch === ' ' ? '\u00A0' : ch}</span>
                   ))}
                 </h3>
               </div>
@@ -830,7 +1002,7 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
                   style={{ color: '#f5f3ee' }}
                 >
                   {Array.from(MOTTO).map((ch, li) => (
-                    <span key={li}>{ch === ' ' ? ' ' : ch}</span>
+                    <span key={li}>{ch === ' ' ? '\u00A0' : ch}</span>
                   ))}
                 </h3>
               </div>
