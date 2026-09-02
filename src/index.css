@@ -28,6 +28,7 @@
   html {
     background: var(--bg-main);
     overflow-x: hidden;
+    overflow-x: clip;
   }
 
   body {

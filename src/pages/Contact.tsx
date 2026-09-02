@@ -27,7 +27,7 @@ const Contact: React.FC = () => {
     setStatus('sending');
     setStatusMessage('Sending your enquiry…');
 
-    const apiUrl = (import.meta as any).env?.VITE_API_URL as string | undefined;
+    const apiUrl = ((import.meta as any).env?.VITE_API_URL as string | undefined) || 'http://localhost:8000';
     const openEmailFallback = () => {
       window.location.href = emailFallbackHref;
       setStatus('email');
