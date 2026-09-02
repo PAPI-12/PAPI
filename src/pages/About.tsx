@@ -13,9 +13,9 @@ const About: React.FC = () => {
         <div className="absolute inset-y-0 right-0 w-[46%] md:w-[38%] lg:w-[34%] hidden md:block pointer-events-none">
           <div className="relative h-full w-full">
             <img loading="lazy" decoding="async"
-              src="/images/about-hero.webp"
+              src="/images/PAPI RABORIFE ABOUT COVER.webp"
               alt="Papi Raborife"
-              className="absolute inset-0 h-full w-full object-cover object-top grayscale contrast-[1.05] brightness-[0.85]"
+              className="absolute inset-0 h-full w-full object-cover object-center grayscale contrast-[1.05] brightness-[0.85]"
               style={{ maskImage: 'linear-gradient(to left, black 55%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to left, black 55%, transparent 100%)' }}
             />
             <div className="absolute inset-0 bg-gradient-to-t from-[#171715] via-transparent to-[#171715]/40" />
@@ -51,9 +51,9 @@ const About: React.FC = () => {
           </div>
           <div className="md:hidden mt-8 -mx-4 sm:-mx-6">
             <img loading="lazy" decoding="async"
-              src="/images/about-hero.webp"
+              src="/images/PAPI RABORIFE ABOUT COVER.webp"
               alt="Papi Raborife"
-              className="w-full h-[52vw] object-cover object-top grayscale contrast-[1.05] brightness-[0.85]"
+              className="w-full h-[52vw] object-cover object-center grayscale contrast-[1.05] brightness-[0.85]"
             />
           </div>
         </motion.div>

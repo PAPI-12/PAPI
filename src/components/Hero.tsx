@@ -186,10 +186,11 @@ const Hero: React.FC = () => {
     const paintOverlay = () => {
       syncBox();
       if (boxW < 8 || boxH < 8) return;
-      // The overlay is a soft, graded blur of the image underneath — retina
-      // resolution here only costs fill-rate on every erase stroke (the hero
-      // mouse-move lag), so the buffer stays at CSS pixel density.
-      dpr = 1;
+      // The overlay is visible across the entire first impression, so it must
+      // retain the photograph's detail on Retina displays. The erase path no
+      // longer uses costly per-stroke canvas filters, making a 2x cap a safe
+      // quality/performance balance instead of the visibly soft 1x buffer.
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
       canvas.width = Math.floor(boxW * dpr);
       canvas.height = Math.floor(boxH * dpr);
       canvas.style.width = `${boxW}px`;
@@ -219,11 +220,13 @@ const Hero: React.FC = () => {
         const dw = src.naturalWidth * scale;
         const dh = src.naturalHeight * scale;
         let posX = 50;
-        let posY = 0;
+        let posY = 50;
         const pos = getComputedStyle(src).objectPosition.trim().split(/\s+/);
         if (pos.length === 2) {
-          posX = parseFloat(pos[0]);
-          posY = parseFloat(pos[1]);
+          const parsedX = parseFloat(pos[0]);
+          const parsedY = parseFloat(pos[1]);
+          if (Number.isFinite(parsedX)) posX = parsedX;
+          if (Number.isFinite(parsedY)) posY = parsedY;
         }
         ctx.drawImage(src, (boxW - dw) * (posX / 100), (boxH - dh) * (posY / 100), dw, dh);
         ctx.filter = 'none';
@@ -441,20 +444,25 @@ const Hero: React.FC = () => {
       className="relative h-[100svh] min-h-[540px] flex items-center justify-center overflow-hidden bg-[#171715]"
     >
       <div className="absolute inset-0 z-0">
-        {/* Full-colour source image. The canvas above it holds the darkening
-            overlay that the ring erases. Desktop (wide aspect) gets the
-            outpainted 16:9 landscape variant so the portrait is never
-            zoomed/cropped into on laptops; phones keep the original. */}
-        <picture>
+        {/* Full-colour source image. Wide screens receive a seamless 16:9,
+            high-density outpaint so the complete portrait can fill the hero
+            without the old side blocks. The picture itself must own the hero
+            bounds; otherwise percentage sizing on its child can collapse. */}
+        <picture className="absolute inset-0 block h-full w-full">
           <source
             srcSet="/images/hero-landscape.webp"
             media="(min-width: 1024px) and (min-aspect-ratio: 5/4)"
+            type="image/webp"
+            width="3200"
+            height="1800"
           />
           <img
             ref={overlayImgRef}
             src="/images/Hero image.webp"
             alt="Papi Raborife"
-            className="w-full h-full object-cover object-top lg:object-[50%_38%]"
+            className="absolute inset-0 h-full w-full object-cover object-center"
+            width="2778"
+            height="2264"
             fetchPriority="high"
             decoding="async"
             onError={(e) => { e.currentTarget.style.display = 'none'; }}
