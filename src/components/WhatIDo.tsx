@@ -326,9 +326,11 @@ const WhatIDo: React.FC<{ variant?: 'home' | 'about' }> = ({ variant = 'home' })
       const speakT = actT > T_BOOT + 0.35 ? 1 : 0; // arm flag; lines use their schedules
       const releaseT = actT > SPEAK_END ? smoothstep((actT - SPEAK_END) / 0.9) : 0;
       const surgeT = actT > SPEAK_END - 0.5 ? smoothstep((actT - (SPEAK_END - 0.5)) / 2.0) : 0;
-      if (machineMode && actStart > 0 && actT > ACT_DONE && lockArmed) {
-        // Transmission complete: release the hold and remember — the machine
+      if (machineMode && actStart > 0 && actT > ACT_DONE) {
+        // Transmission complete: release any hold and remember — the machine
         // plays once per visit, then the section belongs to scroll again.
+        // (Touch devices are never held, so this is also where THEY mark the
+        // act as spent; otherwise it replayed on every pass.)
         machineActSpent = true;
         disarmLock();
       }
