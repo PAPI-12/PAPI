@@ -18,7 +18,7 @@ import { useEffect } from 'react';
  * - The rAF loop stops the moment it arrives; it never idles.
  * - Bounded per-event delta, so a trackpad fling or a "scroll to bottom"
  *   gesture cannot overshoot into a long uninterruptible glide.
- * - The pending glide can never run more than ~0.85 screens ahead of the
+ * - The pending glide can never run more than ~0.55 screens ahead of the
  *   current position. Without that cap, a hard inertial fling accumulates a
  *   target screens ahead and warps straight through pinned sections
  *   (What I Do) in fast-forward — the exact "it never stops me" failure.
@@ -75,7 +75,9 @@ export function useSmoothScroll() {
 
       // Ease toward the target. The factor gives a calm, controllable glide
       // without feeling laggy on long travels.
-      const stepSize = distance * 0.14;
+      // 0.105 (was 0.14): slightly less aggressive so pinned sections get a
+      // beat of stillness at their end stops instead of being rushed past.
+      const stepSize = distance * 0.105;
       // Guarantee forward progress so we can never stall just short.
       const step = Math.abs(stepSize) < 0.5 ? Math.sign(stepSize) * 0.5 : stepSize;
 
@@ -114,7 +116,7 @@ export function useSmoothScroll() {
       else if (e.deltaMode === 2) delta *= window.innerHeight;
 
       // Cap one gesture's contribution so a fling cannot launch a huge glide.
-      delta = clamp(delta, -window.innerHeight * 0.9, window.innerHeight * 0.9);
+      delta = clamp(delta, -window.innerHeight * 0.75, window.innerHeight * 0.75);
 
       const max = maxScroll();
       // If we are not currently animating, base the new target on where the
@@ -122,11 +124,11 @@ export function useSmoothScroll() {
       const base = animating ? target : window.scrollY;
       let next = base + delta;
       // No matter how much inertia a fling feeds in, the glide may only ever
-      // lead the real position by ~0.85 screens. Trackpads keep emitting
+      // lead the real position by ~0.55 screens. Trackpads keep emitting
       // events while the fingers move, so deliberate fast scrolling keeps its
-      // glide; a released fling, however, dies inside one screen and can
-      // never warp through a pinned sequence.
-      const lead = window.innerHeight * 0.85;
+      // glide; a released fling dies inside half a screen and can never warp
+      // through a pinned sequence.
+      const lead = window.innerHeight * 0.55;
       next = clamp(next, window.scrollY - lead, window.scrollY + lead);
       next = clamp(next, 0, max);
 
