@@ -25,6 +25,13 @@ const RING_STROKE = -1;
  * this module and the overlay returns.
  */
 let overlaySpent = false;
+/**
+ * Consuming the overlay is deferred by a tick. React's StrictMode mounts,
+ * unmounts and re-mounts every effect in development — without this, that
+ * synthetic unmount ate the overlay before the visitor ever saw it, and the
+ * hero looked broken in dev while being fine in production.
+ */
+let overlaySpendTimer = 0;
 
 const HeroLetters: React.FC<{ text: string }> = ({ text }) => (
   <>
@@ -93,6 +100,9 @@ const Hero: React.FC = () => {
     const canvas = eraserRef.current;
     if (!hero || !ring || !canvas) return;
 
+    // A re-mount inside the same tick (StrictMode) cancels the pending spend.
+    if (overlaySpendTimer) { clearTimeout(overlaySpendTimer); overlaySpendTimer = 0; }
+
     let boxLeft = 0;
     let boxTop = 0;
     let boxW = 0;
@@ -157,6 +167,10 @@ const Hero: React.FC = () => {
       const svg = ring.querySelector('svg');
       const path = ring.querySelector('path');
       const text = ring.querySelector('text');
+      // textLength is honoured on <textPath> by some engines and on <text> by
+      // others — write it to both so the label is circumference-pinned (and
+      // therefore seamless) in every browser.
+      const textPath = ring.querySelector('textPath');
       if (svg) svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
       if (path) {
         // Text baseline sits just inside the ring edge.
@@ -172,9 +186,14 @@ const Hero: React.FC = () => {
           // letter gaps ONLY, so glyphs keep their true shapes (no stretch) and
           // the loop never cuts a word.
           const px = Math.max(12, Math.min(22, radius * 0.4));
+          const circumference = (2 * Math.PI * pr).toFixed(1);
           text.setAttribute('font-size', String(px));
-          text.setAttribute('textLength', (2 * Math.PI * pr).toFixed(1));
+          text.setAttribute('textLength', circumference);
           text.setAttribute('lengthAdjust', 'spacing');
+          if (textPath) {
+            textPath.setAttribute('textLength', circumference);
+            textPath.setAttribute('lengthAdjust', 'spacing');
+          }
         }
       }
     };
@@ -411,7 +430,7 @@ const Hero: React.FC = () => {
         // Gentle continuous rotation of the label. Rotating the group (one
         // transform) instead of shifting text along the path keeps every frame
         // free of SVG text re-layout — the big lag source while sweeping.
-        // The doubled label is circumference-pinned, so the loop is seamless.
+        // The circumference-pinned label makes the loop seamless.
         spin = (spin + dt * 14) % 360;
         ringSpinRef.current?.setAttribute(
           'transform',
@@ -422,8 +441,11 @@ const Hero: React.FC = () => {
     raf = requestAnimationFrame(frame);
 
     return () => {
-      // Leaving the hero (route change or unmount) consumes the overlay.
-      overlaySpent = true;
+      // Leaving the hero (route change or unmount) consumes the overlay —
+      // unless we are straight back in a moment, which is a StrictMode
+      // remount rather than the visitor actually leaving.
+      if (overlaySpendTimer) clearTimeout(overlaySpendTimer);
+      overlaySpendTimer = window.setTimeout(() => { overlaySpent = true; }, 80);
       cancelAnimationFrame(raf);
       io.disconnect();
       bodyTrailRef.current = null;

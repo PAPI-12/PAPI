@@ -64,7 +64,6 @@
 @media (max-width: 768px) { .text-stroke { -webkit-text-stroke: 1px rgba(245, 243, 238, 0.4); } }
 
 .mix-grain { position: relative; }
-
 /* Grain film — a FIXED full-viewport layer, not a per-section one.
    A section-absolute film (the old behaviour) made each section's own grain
    slide into view, which read as the whole site "jittering" while scrolling.
@@ -150,7 +149,6 @@
   75% { opacity: 0.9; transform: translateY(2px); }
   100% { opacity: 0; transform: translateY(8px); }
 }
-
 @media (prefers-reduced-motion: reduce) {
   .matrix-guide-caret { animation: none; }
 }
