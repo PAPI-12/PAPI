@@ -15,7 +15,16 @@ const Home: React.FC = () => {
   ];
 
   return (
-    <div className="bg-[#171715]">
+    // A single, viewport-locked ambient wash spans the ENTIRE home page — the
+    // grain film used to be per-section, and each section's own film sliding
+    // into view read as the site "jittering" while scrolling.
+    <div
+      className="relative z-10 bg-[#171715]"
+      style={{
+        backgroundImage:
+          'radial-gradient(90% 60% at 85% -10%, rgba(215,255,79,0.16), transparent 55%), radial-gradient(70% 50% at -10% 30%, rgba(215,196,170,0.1), transparent 60%), radial-gradient(80% 60% at 50% 120%, rgba(245,243,238,0.06), transparent 62%)',
+      }}
+    >
       <Hero />
 
       {/* About holds while What I Do — a full opaque page — scrolls over it. */}

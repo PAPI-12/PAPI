@@ -51,13 +51,28 @@ const Clients: React.FC = () => {
         </p>
       </div>
 
-      {/* Ambient scribbles */}
+      {/* Ambient scribbles — a constellation of crosses and waves in mixed
+          sizes and weights, placed in the negative space around the stack. */}
       <ScribbleX className="absolute top-[18%] left-[10%] w-8 h-8 md:w-10 md:h-10 opacity-65 rotate-12 hidden sm:block" />
       <ScribbleX className="absolute top-[42%] right-[7%] w-7 h-7 opacity-55 -rotate-6 hidden md:block" />
       <ScribbleX className="absolute bottom-[8%] right-[12%] w-7 h-7 opacity-55 rotate-12 hidden lg:block" />
       <ScribbleUnderline className="absolute top-[48%] left-[15%] w-44 h-5 opacity-45 hidden md:block" />
       <ScribbleUnderline className="absolute bottom-[18%] right-[18%] w-48 h-5 opacity-45 hidden lg:block" />
       <ScribbleWave className="absolute bottom-[6%] left-[6%] w-20 h-6 opacity-55 hidden md:block" />
+
+      {/* Light tick-marks high, a heavy cross low right, waves running the
+          baseline — the rhythm loosely follows the brand rows. */}
+      <ScribbleX className="absolute top-[9%] right-[20%] w-4 h-4 opacity-40 rotate-45 hidden md:block" />
+      <ScribbleX className="absolute top-[26%] right-[12%] w-3 h-3 opacity-35 -rotate-12 hidden sm:block" />
+      <ScribbleX className="absolute top-[52%] left-[6%] w-4 h-4 opacity-45 rotate-[24deg] hidden lg:block" />
+      <ScribbleX className="absolute top-[63%] right-[16%] w-6 h-6 opacity-50 rotate-6 hidden md:block" />
+      <ScribbleX className="absolute bottom-[14%] left-[9%] w-12 h-12 opacity-[0.38] -rotate-12 hidden sm:block" />
+      <ScribbleX className="absolute bottom-[26%] left-[30%] w-3.5 h-3.5 opacity-40 rotate-[72deg] hidden xl:block" />
+      <ScribbleWave className="absolute top-[14%] left-[24%] w-28 h-5 opacity-35 rotate-2 hidden lg:block" />
+      <ScribbleWave className="absolute top-[58%] right-[26%] w-24 h-4 opacity-30 -rotate-3 hidden xl:block" />
+      <ScribbleWave className="absolute bottom-[24%] right-[6%] w-36 h-6 opacity-45 rotate-1 hidden md:block" />
+      <ScribbleUnderline className="absolute top-[34%] left-[4%] w-28 h-4 opacity-30 rotate-[-8deg] hidden lg:block" />
+      <ScribbleUnderline className="absolute top-[70%] left-[38%] w-36 h-4 opacity-35 rotate-2 hidden xl:block" />
 
       {/* Stack is strictly contained inside project margins; desktop keeps the
           editorial offset rhythm while mobile remains centered and safe. */}
