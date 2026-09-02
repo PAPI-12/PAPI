@@ -6,13 +6,13 @@ import { useHeroPhysics, type HeroCursor } from '../hooks/useHeroPhysics';
 
 const RING_WORD = 'CULTURE LED CREATIVE';
 /**
- * The label is laid twice around the path and startOffset sweeps 0% -> 50%
- * before wrapping. Because the second copy starts exactly where the first
- * ends, the wrap point is visually identical: the ring loops forever without
- * ever appearing to jump back to the start.
+ * One label, laid around the full circumference and pinned to it with
+ * textLength. Rotating the group (a single transform) instead of shifting the
+ * text along the path means zero SVG text re-layout per frame — and because
+ * the label exactly fills the circle, the 360-degree wrap is invisible: the
+ * words loop forever, never cut mid-glyph, at a font size that fills the ring.
  */
-const RING_LABEL = `${RING_WORD} \u00B7 `;
-const RING_TEXT = RING_LABEL + RING_LABEL;
+const RING_TEXT = `${RING_WORD} \u00B7 `;
 
 /** Eraser stroke key reserved for the cursor ring; bodies use their own keys. */
 const RING_STROKE = -1;
@@ -43,7 +43,7 @@ const HeroLetters: React.FC<{ text: string }> = ({ text }) => (
 const Hero: React.FC = () => {
   const heroRef = useRef<HTMLDivElement>(null);
   const ringRef = useRef<HTMLDivElement>(null);
-  const ringTextRef = useRef<SVGTextPathElement>(null);
+  const ringSpinRef = useRef<SVGGElement>(null);
   const eraserRef = useRef<HTMLCanvasElement>(null);
   const overlayImgRef = useRef<HTMLImageElement>(null);
 
@@ -121,6 +121,7 @@ const Hero: React.FC = () => {
     let raf = 0;
     let lastT = 0;
     let spin = 0;
+    let ringC = 0;
 
     const syncBox = () => {
       const r = hero.getBoundingClientRect();
@@ -159,18 +160,21 @@ const Hero: React.FC = () => {
       if (svg) svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
       if (path) {
         // Text baseline sits just inside the ring edge.
-        const pr = Math.max(radius - Math.max(radius * 0.2, 4), 6);
+        const pr = Math.max(radius - Math.max(radius * 0.24, 8), 6);
         const c = size / 2;
+        ringC = c;
         path.setAttribute(
           'd',
           `M ${c} ${c - pr} A ${pr} ${pr} 0 1 1 ${c - 0.01} ${c - pr}`,
         );
         if (text) {
-          // Fit the label exactly once around the circumference.
-          const circumference = 2 * Math.PI * pr;
-          const px = Math.max(6, Math.min(15, (circumference / RING_TEXT.length) * 1.72));
+          // single label pinned to the exact circumference; `spacing` adjusts
+          // letter gaps ONLY, so glyphs keep their true shapes (no stretch) and
+          // the loop never cuts a word.
+          const px = Math.max(12, Math.min(22, radius * 0.4));
           text.setAttribute('font-size', String(px));
-          text.setAttribute('letter-spacing', String(px * 0.08));
+          text.setAttribute('textLength', (2 * Math.PI * pr).toFixed(1));
+          text.setAttribute('lengthAdjust', 'spacing');
         }
       }
     };
@@ -182,7 +186,10 @@ const Hero: React.FC = () => {
     const paintOverlay = () => {
       syncBox();
       if (boxW < 8 || boxH < 8) return;
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      // The overlay is a soft, graded blur of the image underneath — retina
+      // resolution here only costs fill-rate on every erase stroke (the hero
+      // mouse-move lag), so the buffer stays at CSS pixel density.
+      dpr = 1;
       canvas.width = Math.floor(boxW * dpr);
       canvas.height = Math.floor(boxH * dpr);
       canvas.style.width = `${boxW}px`;
@@ -204,13 +211,21 @@ const Hero: React.FC = () => {
       const src = overlayImgRef.current;
       if (src && src.complete && src.naturalWidth > 0) {
         // Draw the SAME image, graded down. Erasing this layer is what exposes
-        // the full-colour original sitting underneath.
+        // the full-colour original sitting underneath. Mirror the <img>'s
+        // actual object-fit/object-position computed values so the erased
+        // holes always line up with the pixels beneath, whatever the CSS says.
         ctx.filter = 'grayscale(100%) contrast(1.3) brightness(0.35) saturate(0.3)';
-        // object-cover / object-top, matched to the <img> beneath.
         const scale = Math.max(boxW / src.naturalWidth, boxH / src.naturalHeight);
         const dw = src.naturalWidth * scale;
         const dh = src.naturalHeight * scale;
-        ctx.drawImage(src, (boxW - dw) / 2, 0, dw, dh);
+        let posX = 50;
+        let posY = 0;
+        const pos = getComputedStyle(src).objectPosition.trim().split(/\s+/);
+        if (pos.length === 2) {
+          posX = parseFloat(pos[0]);
+          posY = parseFloat(pos[1]);
+        }
+        ctx.drawImage(src, (boxW - dw) * (posX / 100), (boxH - dh) * (posY / 100), dw, dh);
         ctx.filter = 'none';
       } else {
         ctx.fillStyle = '#171715';
@@ -240,14 +255,17 @@ const Hero: React.FC = () => {
       if (prev && Math.hypot(x - prev.x, y - prev.y) < 0.6) return;
 
       ctx.globalCompositeOperation = 'destination-out';
-      ctx.filter = 'blur(1px)';
+      // NOTE: no ctx.filter blur here. A blurred stroke per segment is a
+      // full-canvas filter repaint — the main source of hero lag while the
+      // cursor sweeps. Two alpha passes fake the feather for nearly free.
       ctx.fillStyle = '#000';
       ctx.strokeStyle = '#000';
 
       if (prev) {
-        ctx.lineWidth = r * 2;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
+        ctx.globalAlpha = 0.4;
+        ctx.lineWidth = r * 2;
         ctx.beginPath();
         ctx.moveTo(prev.x, prev.y);
         ctx.lineTo(x, y);
@@ -257,8 +275,11 @@ const Hero: React.FC = () => {
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.arc(x, y, r * 0.85, 0, Math.PI * 2);
+      ctx.fill();
 
-      ctx.filter = 'none';
       ctx.globalCompositeOperation = 'source-over';
 
       if (prev) { prev.x = x; prev.y = y; }
@@ -345,8 +366,19 @@ const Hero: React.FC = () => {
     const DAMP = 30;
     const MASS = 0.5;
 
+    // The hero keeps a per-frame spring + writes running the whole page life,
+    // which is wasted work once it has scrolled away — gate the loop on
+    // visibility so sections below the hero never pay for it.
+    let heroVisible = true;
+    const io = new IntersectionObserver(
+      ([entry]) => { heroVisible = !!entry?.isIntersecting; if (heroVisible) lastT = 0; },
+      { rootMargin: '10% 0px' },
+    );
+    io.observe(hero);
+
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
+      if (!heroVisible || document.hidden) { lastT = 0; return; }
       const dt = lastT ? Math.min((now - lastT) / 1000, 0.032) : 1 / 60;
       lastT = now;
 
@@ -373,10 +405,15 @@ const Hero: React.FC = () => {
 
       if (pointerSeen) {
         erase(RING_STROKE, cx, cy, radius);
-        // Gentle continuous rotation of the label.
-        // Wrap at 50% — one full label width — so the loop never restarts.
-        spin = (spin + dt * 4.5) % 50;
-        ringTextRef.current?.setAttribute('startOffset', `${spin.toFixed(3)}%`);
+        // Gentle continuous rotation of the label. Rotating the group (one
+        // transform) instead of shifting text along the path keeps every frame
+        // free of SVG text re-layout — the big lag source while sweeping.
+        // The doubled label is circumference-pinned, so the loop is seamless.
+        spin = (spin + dt * 14) % 360;
+        ringSpinRef.current?.setAttribute(
+          'transform',
+          `rotate(${spin.toFixed(2)} ${ringC} ${ringC})`,
+        );
       }
     };
     raf = requestAnimationFrame(frame);
@@ -385,6 +422,7 @@ const Hero: React.FC = () => {
       // Leaving the hero (route change or unmount) consumes the overlay.
       overlaySpent = true;
       cancelAnimationFrame(raf);
+      io.disconnect();
       bodyTrailRef.current = null;
       window.clearTimeout(resizeTimer);
       window.removeEventListener('resize', onResize);
@@ -404,16 +442,24 @@ const Hero: React.FC = () => {
     >
       <div className="absolute inset-0 z-0">
         {/* Full-colour source image. The canvas above it holds the darkening
-            overlay that the ring erases. */}
-        <img
-          ref={overlayImgRef}
-          src="/images/Hero image.webp"
-          alt="Papi Raborife"
-          className="w-full h-full object-cover object-top"
-          fetchPriority="high"
-          decoding="async"
-          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-        />
+            overlay that the ring erases. Desktop (wide aspect) gets the
+            outpainted 16:9 landscape variant so the portrait is never
+            zoomed/cropped into on laptops; phones keep the original. */}
+        <picture>
+          <source
+            srcSet="/images/hero-landscape.webp"
+            media="(min-width: 1024px) and (min-aspect-ratio: 5/4)"
+          />
+          <img
+            ref={overlayImgRef}
+            src="/images/Hero image.webp"
+            alt="Papi Raborife"
+            className="w-full h-full object-cover object-top lg:object-[50%_38%]"
+            fetchPriority="high"
+            decoding="async"
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
+        </picture>
         {interactive ? (
           <canvas ref={eraserRef} className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden />
         ) : (
@@ -494,19 +540,19 @@ const Hero: React.FC = () => {
             <defs>
               <path id={ringPathId} fill="none" />
             </defs>
-            <text
-              fill="#d7ff4f"
-              fontFamily="'JetBrains Mono', ui-monospace, SFMono-Regular, monospace"
-              fontWeight="800"
-              paintOrder="stroke"
-              stroke="rgba(23,23,21,0.55)"
-              strokeWidth="2.5"
-              strokeLinejoin="round"
-            >
-              <textPath ref={ringTextRef} href={`#${ringPathId}`} startOffset="0%">
-                {RING_TEXT}
-              </textPath>
-            </text>
+            {/* Text only — no extra circles; the site's own cursor circle is
+                the ring. Pure lime, no dark halo: same paint as the crosses. */}
+            <g ref={ringSpinRef}>
+              <text
+                fill="#d7ff4f"
+                fontFamily="'JetBrains Mono', ui-monospace, SFMono-Regular, monospace"
+                fontWeight="500"
+              >
+                <textPath href={`#${ringPathId}`} startOffset="0%">
+                  {RING_TEXT}
+                </textPath>
+              </text>
+            </g>
           </svg>
         </div>
       )}

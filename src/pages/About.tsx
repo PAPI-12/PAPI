@@ -59,7 +59,7 @@ const About: React.FC = () => {
         </motion.div>
       </section>
 
-      <WhatIDo />
+      <WhatIDo variant="about" />
 
       <section className="px-4 sm:px-6 lg:px-12 xl:px-24 py-14 md:py-24">
         <div className="max-w-[1600px] mx-auto">
